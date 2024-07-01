@@ -59,7 +59,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -68,7 +67,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SuppressWarnings("OptionalGetWithoutIsPresent")
 public class TestRecordPath {
@@ -694,6 +692,34 @@ public class TestRecordPath {
         assertEquals("Y", evaluateSingleFieldValue("//*[. = toUpperCase(.)]", record).getValue());
     }
 
+
+    @Test
+    public void testRecursiveWithChoiceThatIncludesRecord() {
+        final RecordSchema personSchema = new SimpleRecordSchema(Arrays.asList(
+                new RecordField("name", RecordFieldType.STRING.getDataType()),
+                new RecordField("age", RecordFieldType.INT.getDataType())
+        ));
+
+        final DataType personDataType = RecordFieldType.RECORD.getRecordDataType(personSchema);
+        final DataType stringDataType = RecordFieldType.STRING.getDataType();
+
+        final List<RecordField> fields = new ArrayList<>();
+        fields.add(new RecordField("person", RecordFieldType.CHOICE.getChoiceDataType(stringDataType, personDataType)));
+        final RecordSchema schema = new SimpleRecordSchema(fields);
+
+        final Map<String, Object> personValueMap = new HashMap<>();
+        personValueMap.put("name", "John Doe");
+        personValueMap.put("age", 30);
+        final Record personRecord = new MapRecord(personSchema, personValueMap);
+
+        final Map<String, Object> values = new HashMap<>();
+        values.put("person", personRecord);
+
+        final Record record = new MapRecord(schema, values);
+        final List<Object> expectedValues = List.of(personRecord, "John Doe", 30);
+        assertEquals(expectedValues, valuesOf(evaluateMultiFieldValue("//*", record)));
+    }
+
     @Nested
     class FilterFunctions {
 
@@ -852,12 +878,64 @@ public class TestRecordPath {
 
         @Nested
         class Base64Decode {
-            // TODO
+            @Test
+            public void testBase64Decode() {
+                final Record record = reduceRecord(TestRecordPath.this.record, "firstName", "lastName", "bytes");
+                record.setValue("firstName", Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)));
+                record.setValue("lastName", Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)));
+                record.setValue("bytes", Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)));
+
+                final List<Object> expectedValues = Arrays.asList("John", "Doe", "xyz".getBytes(StandardCharsets.UTF_8));
+
+                assertEquals("John", evaluateSingleFieldValue("base64Decode(/firstName)", record).getValue());
+                assertEquals("Doe", evaluateSingleFieldValue("base64Decode(/lastName)", record).getValue());
+                assertArrayEquals("xyz".getBytes(StandardCharsets.UTF_8), (byte[]) evaluateSingleFieldValue("base64Decode(/bytes)", record).getValue());
+                List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Decode(/*)", record));
+                IntStream.range(0, 3).forEach(i -> {
+                    Object expectedObject = expectedValues.get(i);
+                    Object actualObject = actualValues.get(i);
+                    if (actualObject instanceof String) {
+                        assertEquals(expectedObject, actualObject);
+                    } else if (actualObject instanceof byte[]) {
+                        assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
+                    }
+                });
+            }
         }
 
         @Nested
         class Base64Encode {
-            // TODO
+
+            @Test
+            public void testBase64Encode() {
+                final Record record = reduceRecord(TestRecordPath.this.record, "firstName", "lastName", "bytes");
+                record.setValue("firstName", "John");
+                record.setValue("lastName", "Doe");
+                record.setValue("bytes", "xyz".getBytes(StandardCharsets.UTF_8));
+
+                final List<Object> expectedValues = Arrays.asList(
+                        Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
+                        Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
+                        Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8))
+                );
+
+                assertEquals(Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
+                        evaluateSingleFieldValue("base64Encode(/firstName)", record).getValue());
+                assertEquals(Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
+                        evaluateSingleFieldValue("base64Encode(/lastName)", record).getValue());
+                assertArrayEquals(Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)),
+                        (byte[]) evaluateSingleFieldValue("base64Encode(/bytes)", record).getValue());
+                List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Encode(/*)", record));
+                IntStream.range(0, 3).forEach(i -> {
+                    Object expectedObject = expectedValues.get(i);
+                    Object actualObject = actualValues.get(i);
+                    if (actualObject instanceof String) {
+                        assertEquals(expectedObject, actualObject);
+                    } else if (actualObject instanceof byte[]) {
+                        assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
+                    }
+                });
+            }
         }
 
         @Nested
@@ -938,7 +1016,15 @@ public class TestRecordPath {
 
         @Nested
         class EscapeJson {
-            // TODO
+            @Test
+            public void testEscapeJson() {
+                final Record record = reduceRecord(TestRecordPath.this.record, "id", "firstName", "attributes", "mainAccount", "numbers");
+
+                assertEquals("\"John\"", evaluateSingleFieldValue("escapeJson(/firstName)", record).getValue());
+                assertEquals("48", evaluateSingleFieldValue("escapeJson(/id)", record).getValue());
+                assertEquals("[0,1,2,3,4,5,6,7,8,9]", evaluateSingleFieldValue("escapeJson(/numbers)", record).getValue());
+                assertEquals("{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}", evaluateSingleFieldValue("escapeJson(/)", record).getValue());
+            }
         }
 
         @Nested
@@ -1406,142 +1492,36 @@ public class TestRecordPath {
 
         @Nested
         class UUID5 {
-            // TODO
+
+            @Test
+            public void testUuidV5() {
+                final UUID namespace = UUID.fromString("67eb2232-f06e-406a-b934-e17f5fa31ae4");
+                final String input = "testing NiFi functionality";
+
+                // TODO split into two tests
+                /*
+                 * Test with a namespace
+                 */
+                record.setValue("firstName", input);
+                record.setValue("lastName", namespace.toString());
+
+                FieldValue fieldValue = evaluateSingleFieldValue("uuid5(/firstName, /lastName)", record);
+
+                String value = fieldValue.getValue().toString();
+                assertEquals(Uuid5Util.fromString(input, namespace.toString()), value);
+
+                /*
+                 * Test with no namespace
+                 */
+                record.setValue("firstName", input);
+                record.setValue("lastName", null); // TODO remove once in own function
+
+                fieldValue = evaluateSingleFieldValue("uuid5(/firstName)", record);
+
+                value = fieldValue.getValue().toString();
+                assertEquals(Uuid5Util.fromString(input, null), value);
+            }
         }
-    }
-
-    @Test
-    public void testRecursiveWithChoiceThatIncludesRecord() {
-        final RecordSchema personSchema = new SimpleRecordSchema(Arrays.asList(
-                new RecordField("name", RecordFieldType.STRING.getDataType()),
-                new RecordField("age", RecordFieldType.INT.getDataType())
-        ));
-
-        final DataType personDataType = RecordFieldType.RECORD.getRecordDataType(personSchema);
-        final DataType stringDataType = RecordFieldType.STRING.getDataType();
-
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("person", RecordFieldType.CHOICE.getChoiceDataType(stringDataType, personDataType)));
-        final RecordSchema schema = new SimpleRecordSchema(fields);
-
-        final Map<String, Object> personValueMap = new HashMap<>();
-        personValueMap.put("name", "John Doe");
-        personValueMap.put("age", 30);
-        final Record personRecord = new MapRecord(personSchema, personValueMap);
-
-        final Map<String, Object> values = new HashMap<>();
-        values.put("person", personRecord);
-
-        final Record record = new MapRecord(schema, values);
-        final List<Object> expectedValues = List.of(personRecord, "John Doe", 30);
-        assertEquals(expectedValues, valuesOf(evaluateMultiFieldValue("//*", record)));
-    }
-
-    @Test
-    public void testBase64Encode() {
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("firstName", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("lastName", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("b", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.BYTE.getDataType())));
-        final RecordSchema schema = new SimpleRecordSchema(fields);
-
-        final List<Object> expectedValues = Arrays.asList(
-                Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
-                Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
-                Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8))
-        );
-        final Map<String, Object> values = new HashMap<>();
-        values.put("firstName", "John");
-        values.put("lastName", "Doe");
-        values.put("b", "xyz".getBytes(StandardCharsets.UTF_8));
-        final Record record = new MapRecord(schema, values);
-
-        assertEquals(Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
-                evaluateSingleFieldValue("base64Encode(/firstName)", record).getValue());
-        assertEquals(Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
-                evaluateSingleFieldValue("base64Encode(/lastName)", record).getValue());
-        assertArrayEquals(Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)),
-                (byte[]) evaluateSingleFieldValue("base64Encode(/b)", record).getValue());
-        List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Encode(/*)", record));
-        IntStream.range(0, 3).forEach(i -> {
-            Object expectedObject = expectedValues.get(i);
-            Object actualObject = actualValues.get(i);
-            if (actualObject instanceof String) {
-                assertEquals(expectedObject, actualObject);
-            } else if (actualObject instanceof byte[]) {
-                assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
-            }
-        });
-    }
-
-    @Test
-    public void testBase64Decode() {
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("firstName", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("lastName", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("b", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.BYTE.getDataType())));
-        final RecordSchema schema = new SimpleRecordSchema(fields);
-
-        final List<Object> expectedValues = Arrays.asList("John", "Doe", "xyz".getBytes(StandardCharsets.UTF_8));
-        final Map<String, Object> values = new HashMap<>();
-        values.put("firstName", Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)));
-        values.put("lastName", Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)));
-        values.put("b", Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)));
-        final Record record = new MapRecord(schema, values);
-
-        assertEquals("John", evaluateSingleFieldValue("base64Decode(/firstName)", record).getValue());
-        assertEquals("Doe", evaluateSingleFieldValue("base64Decode(/lastName)", record).getValue());
-        assertArrayEquals("xyz".getBytes(StandardCharsets.UTF_8), (byte[]) evaluateSingleFieldValue("base64Decode(/b)", record).getValue());
-        List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Decode(/*)", record));
-        IntStream.range(0, 3).forEach(i -> {
-            Object expectedObject = expectedValues.get(i);
-            Object actualObject = actualValues.get(i);
-            if (actualObject instanceof String) {
-                assertEquals(expectedObject, actualObject);
-            } else if (actualObject instanceof byte[]) {
-                assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
-            }
-        });
-    }
-
-    @Test
-    public void testEscapeJson() {
-        final RecordSchema address = new SimpleRecordSchema(Collections.singletonList(
-                new RecordField("address_1", RecordFieldType.STRING.getDataType())
-        ));
-
-        final RecordSchema person = new SimpleRecordSchema(Arrays.asList(
-                new RecordField("firstName", RecordFieldType.STRING.getDataType()),
-                new RecordField("age", RecordFieldType.INT.getDataType()),
-                new RecordField("nicknames", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.STRING.getDataType())),
-                new RecordField("addresses", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.RECORD.getRecordDataType(address)))
-        ));
-
-        final RecordSchema schema = new SimpleRecordSchema(Collections.singletonList(
-                new RecordField("person", RecordFieldType.RECORD.getRecordDataType(person))
-        ));
-
-        final Map<String, Object> values = Map.of(
-                "person", new MapRecord(person, Map.of(
-                        "firstName", "John",
-                        "age", 30,
-                        "nicknames", new String[]{"J", "Johnny"},
-                        "addresses", new MapRecord[]{
-                                new MapRecord(address, Collections.singletonMap("address_1", "123 Somewhere Street")),
-                                new MapRecord(address, Collections.singletonMap("address_1", "456 Anywhere Road"))
-                        }
-                ))
-        );
-
-        final Record record = new MapRecord(schema, values);
-
-        assertEquals("\"John\"", evaluateSingleFieldValue("escapeJson(/person/firstName)", record).getValue());
-        assertEquals("30", evaluateSingleFieldValue("escapeJson(/person/age)", record).getValue());
-        assertEquals(
-                """
-                        {"firstName":"John","age":30,"nicknames":["J","Johnny"],"addresses":[{"address_1":"123 Somewhere Street"},{"address_1":"456 Anywhere Road"}]}""",
-                evaluateSingleFieldValue("escapeJson(/person)", record).getValue()
-        );
     }
 
     @Test
@@ -1687,41 +1667,6 @@ public class TestRecordPath {
         IllegalArgumentException iae = assertThrows(IllegalArgumentException.class,
                 () -> evaluateSingleFieldValue("unescapeJson(/person/age)", recordNotString).getValue());
         assertEquals("Argument supplied to unescapeJson must be a String", iae.getMessage());
-    }
-
-    @Test
-    public void testUuidV5() {
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("input", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("namespace", RecordFieldType.STRING.getDataType(), true));
-        final RecordSchema schema = new SimpleRecordSchema(fields);
-        final UUID namespace = UUID.fromString("67eb2232-f06e-406a-b934-e17f5fa31ae4");
-        final String input = "testing NiFi functionality";
-        final Map<String, Object> values = new HashMap<>();
-        values.put("input", input);
-        values.put("namespace", namespace.toString());
-        final Record record = new MapRecord(schema, values);
-
-        /*
-         * Test with a namespace
-         */
-
-        FieldValue fieldValue = evaluateSingleFieldValue("uuid5(/input, /namespace)", record);
-
-        String value = fieldValue.getValue().toString();
-        assertEquals(Uuid5Util.fromString(input, namespace.toString()), value);
-
-        /*
-         * Test with no namespace
-         */
-        final Map<String, Object> values2 = new HashMap<>();
-        values2.put("input", input);
-        final Record record2 = new MapRecord(schema, values2);
-
-        fieldValue = evaluateSingleFieldValue("uuid5(/input)", record2);
-
-        value = fieldValue.getValue().toString();
-        assertEquals(Uuid5Util.fromString(input, null), value);
     }
 
     private void assertRecordsMatch(final Record expectedRecord, final Object result) {
