@@ -97,13 +97,60 @@ public class TestRecordPath {
     //  maybe add nested class each for maps and array access?
 
 
+    @Test
+    void supportsRecordPathWithReferenceToRootRecord() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/"));
+
+        final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+        assertEquals(Optional.empty(), fieldValue.getParent());
+        assertEquals(record, fieldValue.getValue());
+    }
+
+    @Test
+    void supportsRecordPathWithReferenceToDirectChildField() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/name"));
+
+        final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+        assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("John Doe", fieldValue.getValue());
+
+        final String updatedValue = "Jane Doe";
+        fieldValue.updateValue(updatedValue);
+        assertEquals(updatedValue, record.getValue("name"));
+    }
+
+    // TODO supportsRecordPathWithReferenceToNestedChildField
+    // TODO supportsRecordPathWithReferenceToSelf
+    // TODO supportsRecordPathWithReferenceToParentField
+    // TODO supportsRecordPathWithReference  relative path
+    // TODO supportsRecordPathWithReferenceToEscapedFieldName
+
+    // TODO supportsRecordPathWithReferenceToArrayFieldIndex
+    // TODO supportsRecordPathWithReferenceToNegativeArrayFieldIndex
+    // TODO supportsRecordPathWithReferenceToArrayFieldIndices
+    // TODO supportsRecordPathWithReferenceToArrayFieldIndexRange
+    // TODO supportsRecordPathWithReferenceToCombinedArrayFieldIndexDefintions
+
+    // TODO supportsRecordPathWithReferenceToDescendant
+    // TODO supportsRecordPathWithReferenceToChildFieldOfDescendant
+
+    // TODO supportsRecordPathWithReferenceToMapField
+    // TODO supportsRecordPathWithReferenceToMapFields
+    // TODO supportsRecordPathWithWildcardReferenceToMapFields
+
+    // TODO supportsRecordPathWithStandaloneFunction
+    // TODO supportsRecordPathWithFilterFunction
+
+    // TODO supportsRecordPathWithReferenceToFieldOfType XXX
+    //  - record
+    //  - map
+    //  - array
+    //  - numbers ...
+    //  - string
+    //  - ...?
+
     @Nested
     class Compilation {
-        @Test
-        void compilesRecordPathWithReferenceToRootRecord() {
-            assertDoesNotThrow(() -> RecordPath.compile("/"));
-        }
-
         @Test
         void compilesRecordPathWithReferenceToChildField() {
             assertDoesNotThrow(() -> RecordPath.compile("/person"));
@@ -187,12 +234,6 @@ public class TestRecordPath {
 
     @Nested
     class PathResolving {
-        @Test
-        public void recordPathCanResolveRootRecord() {
-            final FieldValue fieldValue = evaluateSingleFieldValue("/", record);
-            assertEquals(Optional.empty(), fieldValue.getParent());
-            assertEquals(record, fieldValue.getValue());
-        }
 
         @Test
         public void recordPathCanResolveDirectChildFields() {
