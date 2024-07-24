@@ -92,6 +92,11 @@ public class TestRecordPath {
 
     private final Record record = createExampleRecord();
 
+    // TODO
+    //  unite path based tests - always three steps - compiles, resolves, updates
+    //  maybe add nested class each for maps and array access?
+
+
     @Nested
     class Compilation {
         @Test
@@ -547,6 +552,7 @@ public class TestRecordPath {
         assertEquals(123.44D, accountRecord.getValue("balance"));
     }
 
+    // TODO move & split into < / >?
     @Test
     public void testCompareToLiteral() {
         record.setValue("numbers", new Object[]{0, 1, 2});
@@ -558,6 +564,7 @@ public class TestRecordPath {
         assertEquals(0, fieldValues.size());
     }
 
+    // TODO move & split into < / >?
     @Test
     public void testCompareToAbsolute() {
         record.setValue("numbers", new Object[]{0, 1, 2});
@@ -615,93 +622,24 @@ public class TestRecordPath {
 
     @Test
     public void testPredicateDoesNotIncludeFieldsThatDontHaveRelativePath() {
-        // TODO ???
-        final List<RecordField> addressFields = new ArrayList<>();
-        addressFields.add(new RecordField("city", RecordFieldType.STRING.getDataType()));
-        addressFields.add(new RecordField("state", RecordFieldType.STRING.getDataType()));
-        addressFields.add(new RecordField("zip", RecordFieldType.STRING.getDataType()));
-        final RecordSchema addressSchema = new SimpleRecordSchema(addressFields);
-
-        final List<RecordField> detailsFields = new ArrayList<>();
-        detailsFields.add(new RecordField("position", RecordFieldType.STRING.getDataType()));
-        detailsFields.add(new RecordField("managerName", RecordFieldType.STRING.getDataType()));
-        final RecordSchema detailsSchema = new SimpleRecordSchema(detailsFields);
-
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("name", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("address", RecordFieldType.RECORD.getRecordDataType(addressSchema)));
-        fields.add(new RecordField("details", RecordFieldType.RECORD.getRecordDataType(detailsSchema)));
-        final RecordSchema recordSchema = new SimpleRecordSchema(fields);
-
-        final Record record = new MapRecord(recordSchema, new HashMap<>());
-        record.setValue("name", "John Doe");
-
-        final Record addressRecord = new MapRecord(addressSchema, new HashMap<>());
-        addressRecord.setValue("city", "San Francisco");
-        addressRecord.setValue("state", "CA");
-        addressRecord.setValue("zip", "12345");
-        record.setValue("address", addressRecord);
-
-        final Record detailsRecord = new MapRecord(detailsSchema, new HashMap<>());
-        detailsRecord.setValue("position", "Developer");
-        detailsRecord.setValue("managerName", "Jane Doe");
-        record.setValue("details", detailsRecord);
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./state != 'NY']", record);
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./balance = '123.45']", record);
         assertEquals(1, fieldValues.size());
 
         final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("address", fieldValue.getField().getFieldName());
+        assertEquals("mainAccount", fieldValue.getField().getFieldName());
 
-        assertEquals("12345", evaluateSingleFieldValue("/*[./state != 'NY']/zip", record).getValue());
+        assertEquals(1, evaluateSingleFieldValue("/*[./balance = '123.45']/id", record).getValue());
     }
 
     @Test
     public void testPredicateWithAbsolutePath() {
-        // TODO ???
-        final List<RecordField> addressFields = new ArrayList<>();
-        addressFields.add(new RecordField("city", RecordFieldType.STRING.getDataType()));
-        addressFields.add(new RecordField("state", RecordFieldType.STRING.getDataType()));
-        addressFields.add(new RecordField("zip", RecordFieldType.STRING.getDataType()));
-        final RecordSchema addressSchema = new SimpleRecordSchema(addressFields);
+        record.setValue("id", record.getAsRecord("mainAccount", getAccountSchema()).getValue("id"));
 
-        final List<RecordField> detailsFields = new ArrayList<>();
-        detailsFields.add(new RecordField("position", RecordFieldType.STRING.getDataType()));
-        detailsFields.add(new RecordField("preferredState", RecordFieldType.STRING.getDataType()));
-        final RecordSchema detailsSchema = new SimpleRecordSchema(detailsFields);
-
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("name", RecordFieldType.STRING.getDataType()));
-        fields.add(new RecordField("address1", RecordFieldType.RECORD.getRecordDataType(addressSchema)));
-        fields.add(new RecordField("address2", RecordFieldType.RECORD.getRecordDataType(addressSchema)));
-        fields.add(new RecordField("details", RecordFieldType.RECORD.getRecordDataType(detailsSchema)));
-        final RecordSchema recordSchema = new SimpleRecordSchema(fields);
-
-        final Record record = new MapRecord(recordSchema, new HashMap<>());
-        record.setValue("name", "John Doe");
-
-        final Record address1Record = new MapRecord(addressSchema, new HashMap<>());
-        address1Record.setValue("city", "San Francisco");
-        address1Record.setValue("state", "CA");
-        address1Record.setValue("zip", "12345");
-        record.setValue("address1", address1Record);
-
-        final Record address2Record = new MapRecord(addressSchema, new HashMap<>());
-        address2Record.setValue("city", "New York");
-        address2Record.setValue("state", "NY");
-        address2Record.setValue("zip", "01234");
-        record.setValue("address2", address2Record);
-
-        final Record detailsRecord = new MapRecord(detailsSchema, new HashMap<>());
-        detailsRecord.setValue("position", "Developer");
-        detailsRecord.setValue("preferredState", "NY");
-        record.setValue("details", detailsRecord);
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./state = /details/preferredState]", record);
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./id = /id]", record);
         assertEquals(1, fieldValues.size());
 
         final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("address2", fieldValue.getField().getFieldName());
+        assertEquals("mainAccount", fieldValue.getField().getFieldName());
     }
 
     @Test
@@ -1127,7 +1065,10 @@ public class TestRecordPath {
                 assertEquals("\"John\"", evaluateSingleFieldValue("escapeJson(/firstName)", record).getValue());
                 assertEquals("48", evaluateSingleFieldValue("escapeJson(/id)", record).getValue());
                 assertEquals("[0,1,2,3,4,5,6,7,8,9]", evaluateSingleFieldValue("escapeJson(/numbers)", record).getValue());
-                assertEquals("{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}", evaluateSingleFieldValue("escapeJson(/)", record).getValue());
+                assertEquals(
+                        "{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}",
+                        evaluateSingleFieldValue("escapeJson(/)", record).getValue()
+                );
             }
         }
 
@@ -1162,7 +1103,8 @@ public class TestRecordPath {
                 final FieldValue fieldValue2 = evaluateSingleFieldValue(String.format("format( toDate(/date, \"yyyy-MM-dd'T'HH:mm:ss\"), 'yyyy-MM-dd' , '%s')", TEST_TIMEZONE_OFFSET), record);
                 assertEquals(localDateFormatted, fieldValue2.getValue());
 
-                final FieldValue fieldValue3 = evaluateSingleFieldValue(String.format("format( toDate(/date, \"yyyy-MM-dd'T'HH:mm:ss\"), \"yyyy-MM-dd'T'HH:mm:ss\", '%s')", TEST_TIMEZONE_OFFSET), record);
+                final FieldValue fieldValue3 =
+                        evaluateSingleFieldValue(String.format("format( toDate(/date, \"yyyy-MM-dd'T'HH:mm:ss\"), \"yyyy-MM-dd'T'HH:mm:ss\", '%s')", TEST_TIMEZONE_OFFSET), record);
 
                 final ZonedDateTime zonedDateTime = ZonedDateTime.of(localDateTime, ZoneOffset.systemDefault());
                 final ZonedDateTime adjustedZoneDateTime = zonedDateTime.withZoneSameInstant(ZoneOffset.ofHours(TEST_OFFSET_HOURS));
@@ -1178,21 +1120,11 @@ public class TestRecordPath {
 
             @Test
             public void testFormatDateFromLong() {
-                // TODO
-                final List<RecordField> fields = new ArrayList<>();
-                fields.add(new RecordField("id", RecordFieldType.INT.getDataType()));
-                fields.add(new RecordField("date", RecordFieldType.LONG.getDataType()));
-
-                final RecordSchema schema = new SimpleRecordSchema(fields);
-
                 final String localDate = "2017-10-20";
                 final String instantFormatted = String.format("%sT12:30:45Z", localDate);
                 final long epochMillis = Instant.parse(instantFormatted).toEpochMilli();
 
-                final Map<String, Object> values = new HashMap<>();
-                values.put("id", 48);
-                values.put("date", epochMillis);
-                final Record record = new MapRecord(schema, values);
+                record.setValue("date", epochMillis);
 
                 assertEquals(localDate, evaluateSingleFieldValue("format(/date, 'yyyy-MM-dd' )", record).getValue());
                 assertEquals(instantFormatted, evaluateSingleFieldValue("format(/date, \"yyyy-MM-dd'T'HH:mm:ss'Z'\", 'GMT')", record).getValue());
@@ -1572,21 +1504,44 @@ public class TestRecordPath {
         @Nested
         class Trim {
             @Test
-            public void testTrimString() {
-                record.setValue("name", "   John Smith     ");
+            public void removesWhitespaceFromStartOfString() {
+                record.setValue("name", " \n\r\tJohn");
+                assertEquals("John", evaluateSingleFieldValue("trim(/name)", record).getValue());
+            }
 
+            @Test
+            public void removesWhitespaceFromEndOfString() {
+                record.setValue("name", "John \n\r\t");
+                assertEquals("John", evaluateSingleFieldValue("trim(/name)", record).getValue());
+            }
+
+            @Test
+            public void keepsWhitespaceInBetweenNonWhitespaceCharacters() {
+                record.setValue("name", " \n\r\tJohn Smith \n\r\t");
                 assertEquals("John Smith", evaluateSingleFieldValue("trim(/name)", record).getValue());
+            }
+
+            @Test
+            public void yieldsEmptyStringForMissingField() {
                 assertEquals("", evaluateSingleFieldValue("trim(/missing)", record).getValue());
             }
 
             @Test
-            public void testTrimArray() {
+            public void supportsLiteralValue() {
+                // TODO, does this work?
+            }
+
+            @Test
+            public void supportsArrays() {
                 record.setValue("friends", new String[]{"   John Smith     ", "   Jane Smith     "});
 
                 final List<FieldValue> results = evaluateMultiFieldValue("trim(/friends[*])", record);
                 assertEquals("John Smith", results.get(0).getValue());
                 assertEquals("Jane Smith", results.get(1).getValue());
             }
+
+            // todo do maps work?
+            // todo do record wildcards work, what about non string fields?
         }
 
         @Nested
@@ -1743,32 +1698,29 @@ public class TestRecordPath {
         class UUID5 {
 
             @Test
-            public void testUuidV5() {
+            void supportsGenerationWithoutExplicitNamespace() {
+                final String input = "testing NiFi functionality";
+
+                record.setValue("firstName", input);
+
+                final FieldValue fieldValue = evaluateSingleFieldValue("uuid5(/firstName)", record);
+
+                final String value = fieldValue.getValue().toString();
+                assertEquals(Uuid5Util.fromString(input, null), value);
+            }
+
+            @Test
+            public void supportsGenerationWithExplicitNamespace() {
                 final UUID namespace = UUID.fromString("67eb2232-f06e-406a-b934-e17f5fa31ae4");
                 final String input = "testing NiFi functionality";
 
-                // TODO split into two tests
-                /*
-                 * Test with a namespace
-                 */
                 record.setValue("firstName", input);
                 record.setValue("lastName", namespace.toString());
 
-                FieldValue fieldValue = evaluateSingleFieldValue("uuid5(/firstName, /lastName)", record);
+                final FieldValue fieldValue = evaluateSingleFieldValue("uuid5(/firstName, /lastName)", record);
 
-                String value = fieldValue.getValue().toString();
+                final String value = fieldValue.getValue().toString();
                 assertEquals(Uuid5Util.fromString(input, namespace.toString()), value);
-
-                /*
-                 * Test with no namespace
-                 */
-                record.setValue("firstName", input);
-                record.setValue("lastName", null); // TODO remove once in own function
-
-                fieldValue = evaluateSingleFieldValue("uuid5(/firstName)", record);
-
-                value = fieldValue.getValue().toString();
-                assertEquals(Uuid5Util.fromString(input, null), value);
             }
         }
     }
