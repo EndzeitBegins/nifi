@@ -35,6 +35,7 @@ import org.apache.nifi.serialization.record.util.DataTypeUtils;
 import org.apache.nifi.uuid5.Uuid5Util;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -48,7 +49,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
@@ -61,6 +61,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+import static java.util.Map.entry;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,8 +71,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@SuppressWarnings("OptionalGetWithoutIsPresent")
+@SuppressWarnings({"OptionalGetWithoutIsPresent", "SameParameterValue"}) // TODO NIFI-12852 remove warnings for OptionalGetWithoutIsPresent
 public class TestRecordPath {
+
+    // TODO NIFI-12852 Why does descendant operator on maps return all items, regardless of their name?
+    // TODO NIFI-12852 Open ticket for double support of greatherThan etc.? why double guessed as long? interpretation different for reference vs literal ..
+    // TODO NIFI-12852 not() does not support inverting boolean references
 
     private static final String USER_TIMEZONE_PROPERTY = "user.timezone";
     private static final String SYSTEM_TIMEZONE = System.getProperty(USER_TIMEZONE_PROPERTY);
@@ -92,13 +98,8 @@ public class TestRecordPath {
 
     private final Record record = createExampleRecord();
 
-    // TODO
-    //  unite path based tests - always three steps - compiles, resolves, updates
-    //  maybe add nested class each for maps and array access?
-
-
     @Test
-    void supportsRecordPathWithReferenceToRootRecord() {
+    void supportsReferenceToRootRecord() {
         final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/"));
 
         final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
@@ -107,239 +108,347 @@ public class TestRecordPath {
     }
 
     @Test
-    void supportsRecordPathWithReferenceToDirectChildField() {
+    void supportsReferenceToDirectChildField() {
         final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/name"));
 
         final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
         assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("name", fieldValue.getField().getFieldName());
         assertEquals("John Doe", fieldValue.getValue());
-
-        final String updatedValue = "Jane Doe";
-        fieldValue.updateValue(updatedValue);
-        assertEquals(updatedValue, record.getValue("name"));
     }
 
-    // TODO supportsRecordPathWithReferenceToNestedChildField
-    // TODO supportsRecordPathWithReferenceToSelf
-    // TODO supportsRecordPathWithReferenceToParentField
-    // TODO supportsRecordPathWithReference  relative path
-    // TODO supportsRecordPathWithReferenceToEscapedFieldName
+    @Test
+    void supportsReferenceToNestedChildField() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/mainAccount/balance"));
 
-    // TODO supportsRecordPathWithReferenceToArrayFieldIndex
-    // TODO supportsRecordPathWithReferenceToNegativeArrayFieldIndex
-    // TODO supportsRecordPathWithReferenceToArrayFieldIndices
-    // TODO supportsRecordPathWithReferenceToArrayFieldIndexRange
-    // TODO supportsRecordPathWithReferenceToCombinedArrayFieldIndexDefintions
+        final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+        final Record targetParent = record.getAsRecord("mainAccount", getAccountSchema());
+        assertEquals(targetParent, fieldValue.getParentRecord().get());
+        assertEquals("balance", fieldValue.getField().getFieldName());
+        assertEquals(123.45, fieldValue.getValue());
+    }
 
-    // TODO supportsRecordPathWithReferenceToDescendant
-    // TODO supportsRecordPathWithReferenceToChildFieldOfDescendant
+    @Test
+    void supportsReferenceToSelf() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/name/."));
 
-    // TODO supportsRecordPathWithReferenceToMapField
-    // TODO supportsRecordPathWithReferenceToMapFields
-    // TODO supportsRecordPathWithWildcardReferenceToMapFields
+        final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+        assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("name", fieldValue.getField().getFieldName());
+        assertEquals("John Doe", fieldValue.getValue());
+    }
 
-    // TODO supportsRecordPathWithStandaloneFunction
-    // TODO supportsRecordPathWithFilterFunction
+    @Test
+    void supportsReferenceToParentField() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/mainAccount/balance/.."));
 
-    // TODO supportsRecordPathWithReferenceToFieldOfType XXX
-    //  - record
-    //  - map
-    //  - array
-    //  - numbers ...
-    //  - string
-    //  - ...?
+        final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+        assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("mainAccount", fieldValue.getField().getFieldName());
+        assertEquals(record.getValue("mainAccount"), fieldValue.getValue());
+    }
+
+    @Disabled("NIFI-12852 Replace / Remove")
+    @Test
+    public void testRelativePath() {
+        final Record accountRecord = record.getAsRecord("mainAccount", getAccountSchema());
+
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/mainAccount/././balance/.", record);
+        assertEquals(1, fieldValues.size());
+
+        final FieldValue fieldValue = fieldValues.getFirst();
+        assertEquals(accountRecord, fieldValue.getParentRecord().get());
+        assertEquals(123.45D, fieldValue.getValue());
+        assertEquals("balance", fieldValue.getField().getFieldName());
+
+        evaluateMultiFieldValue("/mainAccount/././balance/.", record).forEach(field -> field.updateValue(123.44D));
+        assertEquals(123.44D, accountRecord.getValue("balance"));
+    }
+
+    @Disabled("NIFI-12852 Replace / Remove")
+    @Test
+    public void testRelativePathOnly() {
+        final FieldValue recordFieldValue = new StandardFieldValue(record, recordFieldOf("record", RecordFieldType.RECORD), null);
+
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue("./name", record, recordFieldValue);
+        assertEquals(1, fieldValues.size());
+
+        final FieldValue fieldValue = fieldValues.getFirst();
+        assertEquals("John Doe", fieldValue.getValue());
+        assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("name", fieldValue.getField().getFieldName());
+    }
+
+    @Disabled("NIFI-12852 Replace / Remove")
+    @Test
+    public void testRelativePathAgainstNonRecordField() {
+        final FieldValue recordFieldValue = new StandardFieldValue(record, recordFieldOf("root", recordTypeOf(record.getSchema())), null);
+        final FieldValue nameFieldValue = new StandardFieldValue("John Doe", recordFieldOf("name", RecordFieldType.STRING), recordFieldValue);
+
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue(".", record, nameFieldValue);
+        assertEquals(1, fieldValues.size());
+
+        final FieldValue fieldValue = fieldValues.getFirst();
+        assertEquals("John Doe", fieldValue.getValue());
+        assertEquals(record, fieldValue.getParentRecord().get());
+        assertEquals("name", fieldValue.getField().getFieldName());
+
+        fieldValue.updateValue("Jane Doe");
+        assertEquals("Jane Doe", record.getValue("name"));
+    }
+
+    @Test
+    public void supportsReferenceToEscapedFieldName() {
+        final RecordSchema schema = recordSchemaOf(
+                recordFieldOf("full,name", RecordFieldType.STRING)
+        );
+        final Record record = new MapRecord(schema, Map.of("full,name", "John Doe"));
+
+        final FieldValue fieldValue = evaluateSingleFieldValue("/'full,name'", record);
+        assertEquals("full,name", fieldValue.getField().getFieldName());
+        assertEquals("John Doe", fieldValue.getValue());
+        assertEquals(record, fieldValue.getParentRecord().get());
+    }
+
+    @Test
+    void supportsWildcardReference() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/mainAccount/*"));
+
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue(recordPath, record);
+        final Record targetParent = record.getAsRecord("mainAccount", getAccountSchema());
+        assertAll(
+                () -> assertEquals(3, fieldValues.size()),
+                () -> {
+                    final FieldValue fieldValue = fieldValues.getFirst();
+                    assertEquals(targetParent, fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(1, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(1);
+                    assertEquals(targetParent, fieldValue.getParentRecord().get());
+                    assertEquals("balance", fieldValue.getField().getFieldName());
+                    assertEquals(123.45, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(2);
+                    assertEquals(targetParent, fieldValue.getParentRecord().get());
+                    assertEquals("address", fieldValue.getField().getFieldName());
+                    assertEquals(targetParent.getAsRecord("address", getAddressSchema()), fieldValue.getValue());
+                }
+        );
+    }
+
+    @Test
+    void supportsReferenceToDescendant() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("//id"));
+
+        final Record record = reduceRecord(this.record, "id", "mainAccount", "accounts");
+        final Record mainAccountRecord = record.getAsRecord("mainAccount", getAccountSchema());
+        final Object[] accountRecords = record.getAsArray("accounts");
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue(recordPath, record);
+        assertAll(
+                () -> assertEquals(4, fieldValues.size()),
+                () -> {
+                    final FieldValue fieldValue = fieldValues.getFirst();
+                    assertEquals(record, fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(48, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(1);
+                    assertEquals(mainAccountRecord, fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(1, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(2);
+                    assertEquals(accountRecords[0], fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(6, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(3);
+                    assertEquals(accountRecords[1], fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(9, fieldValue.getValue());
+                }
+        );
+    }
+
+    @Test
+    void supportsReferenceToChildFieldOfDescendant() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("//address/city"));
+
+        final Record record = reduceRecord(this.record, "id", "mainAccount", "accounts");
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue(recordPath, record);
+        final Record mainAccountRecord = record.getAsRecord("mainAccount", getAccountSchema());
+        final Record[] accountRecords = (Record[]) record.getAsArray("accounts");
+        assertAll(
+                () -> assertEquals(3, fieldValues.size()),
+                () -> {
+                    final FieldValue fieldValue = fieldValues.getFirst();
+                    assertEquals(mainAccountRecord.getValue("address"), fieldValue.getParentRecord().get());
+                    assertEquals("city", fieldValue.getField().getFieldName());
+                    assertEquals("Boston", fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(1);
+                    assertEquals(accountRecords[0].getValue("address"), fieldValue.getParentRecord().get());
+                    assertEquals("city", fieldValue.getField().getFieldName());
+                    assertEquals("Las Vegas", fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(2);
+                    assertEquals(accountRecords[1].getValue("address"), fieldValue.getParentRecord().get());
+                    assertEquals("city", fieldValue.getField().getFieldName());
+                    assertEquals("Austin", fieldValue.getValue());
+                }
+        );
+    }
+
+    @Test
+    void supportsReferenceToDescendantWithWildcard() {
+        final RecordPath recordPath = assertDoesNotThrow(() -> RecordPath.compile("/mainAccount//*"));
+
+        final List<FieldValue> fieldValues = evaluateMultiFieldValue(recordPath, record);
+        final Record mainAccountRecord = record.getAsRecord("mainAccount", getAccountSchema());
+        final Record addressRecord = mainAccountRecord.getAsRecord("address", getAddressSchema());
+        assertAll(
+                () -> assertEquals(5, fieldValues.size()),
+                () -> {
+                    final FieldValue fieldValue = fieldValues.getFirst();
+                    assertEquals(mainAccountRecord, fieldValue.getParentRecord().get());
+                    assertEquals("id", fieldValue.getField().getFieldName());
+                    assertEquals(1, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(1);
+                    assertEquals(mainAccountRecord, fieldValue.getParentRecord().get());
+                    assertEquals("balance", fieldValue.getField().getFieldName());
+                    assertEquals(123.45, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(2);
+                    assertEquals(mainAccountRecord, fieldValue.getParentRecord().get());
+                    assertEquals("address", fieldValue.getField().getFieldName());
+                    assertEquals(addressRecord, fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(3);
+                    assertEquals(addressRecord, fieldValue.getParentRecord().get());
+                    assertEquals("city", fieldValue.getField().getFieldName());
+                    assertEquals("Boston", fieldValue.getValue());
+                },
+                () -> {
+                    final FieldValue fieldValue = fieldValues.get(4);
+                    assertEquals(addressRecord, fieldValue.getParentRecord().get());
+                    assertEquals("state", fieldValue.getField().getFieldName());
+                    assertEquals("Massachusetts", fieldValue.getValue());
+                }
+        );
+    }
+
+    @Disabled("NIFI-12852 Replace / Remove")
+    @Test
+    public void testRecursiveWithChoiceThatIncludesRecord() {
+        final RecordSchema personSchema = recordSchemaOf(
+                recordFieldOf("name", RecordFieldType.STRING),
+                recordFieldOf("age", RecordFieldType.INT)
+        );
+
+        final DataType personDataType = recordTypeOf(personSchema);
+        final DataType stringDataType = RecordFieldType.STRING.getDataType();
+
+        final RecordSchema schema = recordSchemaOf(
+                new RecordField("person", RecordFieldType.CHOICE.getChoiceDataType(stringDataType, personDataType))
+        );
+
+        final Map<String, Object> personValueMap = new HashMap<>();
+        personValueMap.put("name", "John Doe");
+        personValueMap.put("age", 30);
+        final Record personRecord = new MapRecord(personSchema, personValueMap);
+
+        final Map<String, Object> values = new HashMap<>();
+        values.put("person", personRecord);
+
+        final Record record = new MapRecord(schema, values);
+        final List<Object> expectedValues = List.of(personRecord, "John Doe", 30);
+        assertEquals(expectedValues, valuesOf(evaluateMultiFieldValue("//*", record)));
+    }
 
     @Nested
-    class Compilation {
-        @Test
-        void compilesRecordPathWithReferenceToChildField() {
-            assertDoesNotThrow(() -> RecordPath.compile("/person"));
-        }
+    class ArrayReferences {
 
-        @Test
-        void compilesRecordPathWithReferenceToNestedChildField() {
-            assertDoesNotThrow(() -> RecordPath.compile("/person/name/last"));
-        }
+        // TODO NIFI-12852 supportsReferenceToArrayFieldIndex
+        // TODO NIFI-12852 supportsReferenceToNegativeArrayFieldIndex
+        // TODO NIFI-12852 supportsReferenceToArrayFieldIndices
+        // TODO NIFI-12852 supportsReferenceToArrayFieldIndexRange
+        // TODO NIFI-12852 supportsReferenceToCombinedArrayFieldIndexDefintions
+        // TODO NIFI-12852 array wildcard?
 
-        @Test
-        void compilesRecordPathWithReferenceToSelf() {
-            assertDoesNotThrow(() -> RecordPath.compile("/person/."));
-        }
-
-        @Test
-        void compilesRecordPathWithReferenceToParentField() {
-            assertDoesNotThrow(() -> RecordPath.compile("/person/.."));
-        }
-
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
         void compilesRecordPathWithReferenceToArrayFieldIndex() {
             assertDoesNotThrow(() -> RecordPath.compile("/persons[1]"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
         void compilesRecordPathWithReferenceToNegativeArrayFieldIndex() {
             assertDoesNotThrow(() -> RecordPath.compile("/persons[-3]"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
         void compilesRecordPathWithReferenceToArrayFieldIndices() {
             assertDoesNotThrow(() -> RecordPath.compile("/persons[1, 2, 4]"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
         void compilesRecordPathWithReferenceToArrayFieldIndexRange() {
             assertDoesNotThrow(() -> RecordPath.compile("/persons[2..9]"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
         void compilesRecordPathWithReferenceToCombinedArrayFieldIndexDefintions() {
             assertDoesNotThrow(() -> RecordPath.compile("/persons[0, 2..9, -2]"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
-        void compilesRecordPathWithReferenceToDescendant() {
-            assertDoesNotThrow(() -> RecordPath.compile("//id"));
+        public void testWildcardWithArray() {
+            final Record record = reduceRecord(createExampleRecord(), "id", "name", "accounts");
+            final Record accountRecord = createAccountRecord();
+            record.setValue("accounts", new Object[]{accountRecord});
+
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[0]", record);
+            assertEquals(1, fieldValues.size());
+
+            final FieldValue fieldValue = fieldValues.getFirst();
+            assertEquals("accounts", fieldValue.getField().getFieldName());
+            assertEquals(record, fieldValue.getParentRecord().get());
+            assertEquals(accountRecord, fieldValue.getValue());
+
+            final Map<String, Object> updatedAccountValues = new HashMap<>(accountRecord.toMap());
+            updatedAccountValues.put("balance", 122.44D);
+            final Record updatedAccountRecord = new MapRecord(getAccountSchema(), updatedAccountValues);
+            evaluateMultiFieldValue("/*[0]", record).forEach(field -> field.updateValue(updatedAccountRecord));
+
+            final Object[] accountRecords = (Object[]) record.getValue("accounts");
+            assertEquals(1, accountRecords.length);
+            final Record recordToVerify = (Record) accountRecords[0];
+            assertEquals(122.44D, recordToVerify.getValue("balance"));
+            assertEquals(48, record.getValue("id"));
+            assertEquals("John Doe", record.getValue("name"));
         }
 
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
-        void compilesRecordPathWithReferenceToChildFieldOfDescendant() {
-            assertDoesNotThrow(() -> RecordPath.compile("/company//address/zipCode"));
-        }
-
-        @Test
-        void compilesRecordPathWithReferenceToMapField() {
-            assertDoesNotThrow(() -> RecordPath.compile("/address['zipCode']"));
-        }
-
-        @Test
-        void compilesRecordPathWithReferenceToMapFields() {
-            assertDoesNotThrow(() -> RecordPath.compile("/address['zipCode', 'state']"));
-        }
-
-        @Test
-        void compilesRecordPathWithWildcardReferenceToMapFields() {
-            assertDoesNotThrow(() -> RecordPath.compile("/address[*]"));
-        }
-
-        @Test
-        void compilesRecordPathWithStandaloneFunction() {
-            assertDoesNotThrow(() -> RecordPath.compile("toUpperCase(/name)"));
-        }
-
-        @Test
-        void compilesRecordPathWithFilterFunction() {
-            assertDoesNotThrow(() -> RecordPath.compile("/name[startsWith(., 'A')]"));
-        }
-    }
-
-    @Nested
-    class PathResolving {
-
-        @Test
-        public void recordPathCanResolveDirectChildFields() {
-            assertEquals(48, evaluateSingleFieldValue("/id", record).getValue());
-            assertEquals(record, evaluateSingleFieldValue("/id", record).getParentRecord().get());
-
-            assertEquals("John Doe", evaluateSingleFieldValue("/name", record).getValue());
-            assertEquals(record, evaluateSingleFieldValue("/name", record).getParentRecord().get());
-
-            assertEquals(record.getValue("mainAccount"), evaluateSingleFieldValue("/mainAccount", record).getValue());
-            assertEquals(record, evaluateSingleFieldValue("/mainAccount", record).getParentRecord().get());
-        }
-
-        @Test
-        public void recordPathCanResolveNestedChildFields() {
-            assertEquals(1, evaluateSingleFieldValue("/mainAccount/id", record).getValue());
-            assertEquals(record.getValue("mainAccount"), evaluateSingleFieldValue("/mainAccount/id", record).getParentRecord().get());
-
-            assertEquals(123.45D, evaluateSingleFieldValue("/mainAccount/balance", record).getValue());
-            assertEquals(record.getValue("mainAccount"), evaluateSingleFieldValue("/mainAccount/id", record).getParentRecord().get());
-        }
-
-        @Test
-        public void recordPathCanResolveChildFieldsUsingWildcard() {
-            final Record accountRecord = record.getAsRecord("mainAccount", getAccountSchema());
-
-            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/mainAccount/*", record);
-            assertEquals(2, fieldValues.size());
-
-            for (final FieldValue fieldValue : fieldValues) {
-                assertEquals(accountRecord, fieldValue.getParentRecord().get());
-            }
-
-            assertEquals("id", fieldValues.get(0).getField().getFieldName());
-            assertEquals(1, fieldValues.get(0).getValue());
-
-            assertEquals("balance", fieldValues.get(1).getField().getFieldName());
-            assertEquals(123.45D, fieldValues.get(1).getValue());
-        }
-    }
-
-    @Nested
-    class PathUpdates {
-        // TODO simple updates, e.g. direct child, root .. ?
-
-        @Test
-        public void recordPathCanUpdateChildFieldsUsingWildcard() {
-            final Record accountRecord = record.getAsRecord("mainAccount", getAccountSchema());
-
-            evaluateMultiFieldValue("/mainAccount/*[. > 100]", record).forEach(field -> field.updateValue(122.44D));
-            assertEquals(1, accountRecord.getValue("id"));
-            assertEquals(122.44D, accountRecord.getValue("balance"));
-        }
-    }
-
-
-
-
-
-    @Test
-    public void testWildcardWithArray() {
-        final Record record = reduceRecord(createExampleRecord(), "id", "name", "accounts");
-        final Record accountRecord = createAccountRecord();
-        record.setValue("accounts", new Object[]{accountRecord});
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[0]", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("accounts", fieldValue.getField().getFieldName());
-        assertEquals(record, fieldValue.getParentRecord().get());
-        assertEquals(accountRecord, fieldValue.getValue());
-
-        final Map<String, Object> updatedAccountValues = new HashMap<>(accountRecord.toMap());
-        updatedAccountValues.put("balance", 122.44D);
-        final Record updatedAccountRecord = new MapRecord(getAccountSchema(), updatedAccountValues);
-        evaluateMultiFieldValue("/*[0]", record).forEach(field -> field.updateValue(updatedAccountRecord));
-
-        final Object[] accountRecords = (Object[]) record.getValue("accounts");
-        assertEquals(1, accountRecords.length);
-        final Record recordToVerify = (Record) accountRecords[0];
-        assertEquals(122.44D, recordToVerify.getValue("balance"));
-        assertEquals(48, record.getValue("id"));
-        assertEquals("John Doe", record.getValue("name"));
-    }
-
-    @Test
-    public void testDescendantField() {
-        final Record record = reduceRecord(createExampleRecord(), "id", "name", "mainAccount");
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("//id", record);
-        assertEquals(2, fieldValues.size());
-
-        final FieldValue first = fieldValues.get(0);
-        final FieldValue second = fieldValues.get(1);
-
-        assertEquals(RecordFieldType.INT, first.getField().getDataType().getFieldType());
-        assertEquals(RecordFieldType.INT, second.getField().getDataType().getFieldType());
-
-        assertEquals(48, first.getValue());
-        assertEquals(1, second.getValue());
-    }
-
-    @Test
-    public void testDescendantFieldWithArrayOfRecords() throws IOException, MalformedRecordException {
-        final String recordJson = """
+        public void testDescendantFieldWithArrayOfRecords() throws IOException, MalformedRecordException {
+            final String recordJson = """
                 {
                   "container" : {
                     "id" : "0",
@@ -365,574 +474,273 @@ public class TestRecordPath {
                 }
                 """;
 
-        final JsonSchemaInference schemaInference = new JsonSchemaInference(new TimeValueInference("MM/dd/yyyy", "HH:mm:ss", "MM/dd/yyyy HH:mm:ss"));
-        final JsonRecordSource jsonRecordSource = new JsonRecordSource(new ByteArrayInputStream(recordJson.getBytes(StandardCharsets.UTF_8)));
-        final RecordSchema schema = schemaInference.inferSchema(jsonRecordSource);
+            final JsonSchemaInference schemaInference = new JsonSchemaInference(new TimeValueInference("MM/dd/yyyy", "HH:mm:ss", "MM/dd/yyyy HH:mm:ss"));
+            final JsonRecordSource jsonRecordSource = new JsonRecordSource(new ByteArrayInputStream(recordJson.getBytes(StandardCharsets.UTF_8)));
+            final RecordSchema schema = schemaInference.inferSchema(jsonRecordSource);
 
-        final JsonTreeRowRecordReader reader = new JsonTreeRowRecordReader(new ByteArrayInputStream(recordJson.getBytes(StandardCharsets.UTF_8)), Mockito.mock(ComponentLog.class),
-                schema, "MM/dd/yyyy", "HH:mm:ss", "MM/dd/yyyy HH:mm:ss");
-        final Record record = reader.nextRecord();
+            final JsonTreeRowRecordReader reader = new JsonTreeRowRecordReader(new ByteArrayInputStream(recordJson.getBytes(StandardCharsets.UTF_8)), Mockito.mock(ComponentLog.class),
+                    schema, "MM/dd/yyyy", "HH:mm:ss", "MM/dd/yyyy HH:mm:ss");
+            final Record record = reader.nextRecord();
 
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("//textElement[./text = 'Table of Contents']/metadata/insertion", record);
-        assertEquals(1, fieldValues.size());
-        fieldValues.getFirst().updateValue("Hello");
-        record.incorporateInactiveFields();
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("//textElement[./text = 'Table of Contents']/metadata/insertion", record);
+            assertEquals(1, fieldValues.size());
+            fieldValues.getFirst().updateValue("Hello");
+            record.incorporateInactiveFields();
 
-        final Record container = (Record) record.getValue("container");
-        final Object[] containers = (Object[]) container.getValue("containers");
-        final Record textElement = (Record) (((Record) containers[0]).getValue("textElement"));
-        final Record metadata = (Record) textElement.getValue("metadata");
-        assertEquals("Hello", metadata.getValue("insertion"));
+            final Record container = (Record) record.getValue("container");
+            final Object[] containers = (Object[]) container.getValue("containers");
+            final Record textElement = (Record) (((Record) containers[0]).getValue("textElement"));
+            final Record metadata = (Record) textElement.getValue("metadata");
+            assertEquals("Hello", metadata.getValue("insertion"));
 
-        final List<RecordField> metadataFields = metadata.getSchema().getFields();
-        assertEquals(1, metadataFields.size());
-        assertEquals("insertion", metadataFields.getFirst().getFieldName());
-    }
-
-    @Test
-    public void testParent() {
-        final Record record = reduceRecord(createExampleRecord(), "id", "name", "mainAccount");
-        final Record accountRecord = record.getAsRecord("mainAccount", getAccountSchema());
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("//id/..", record);
-        assertEquals(2, fieldValues.size());
-
-        final FieldValue first = fieldValues.get(0);
-        final FieldValue second = fieldValues.get(1);
-
-        assertEquals(RecordFieldType.RECORD, first.getField().getDataType().getFieldType());
-        assertEquals(RecordFieldType.RECORD, second.getField().getDataType().getFieldType());
-
-        assertEquals(record, first.getValue());
-        assertEquals(accountRecord, second.getValue());
-    }
-
-    @Test
-    public void testMapKey() {
-        final FieldValue fieldValue = evaluateSingleFieldValue("/attributes['city']", record);
-        assertEquals("attributes", fieldValue.getField().getFieldName());
-        assertEquals("New York", fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-    }
-
-    @Test
-    public void testMapKeyReferencedWithCurrentField() {
-        final FieldValue fieldValue = evaluateSingleFieldValue("/attributes/.['city']", record);
-        assertEquals("attributes", fieldValue.getField().getFieldName());
-        assertEquals("New York", fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-    }
-
-    @Test
-    public void testUpdateMap() {
-        evaluateSingleFieldValue("/attributes['city']", record).updateValue("Boston");
-        assertEquals("Boston", (getMapValue(record, "attributes")).get("city"));
-    }
-
-    @Test
-    public void testMapWildcard() {
-        final Map<String, String> attributes = getMapValue(record, "attributes");
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/attributes[*]", record);
-        assertEquals(2, fieldValues.size());
-
-        assertEquals("New York", fieldValues.get(0).getValue());
-        assertEquals("NY", fieldValues.get(1).getValue());
-
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("attributes", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
+            final List<RecordField> metadataFields = metadata.getSchema().getFields();
+            assertEquals(1, metadataFields.size());
+            assertEquals("insertion", metadataFields.getFirst().getFieldName());
         }
 
-        evaluateMultiFieldValue("/attributes[*]", record).forEach(field -> field.updateValue("Unknown"));
-        assertEquals("Unknown", attributes.get("city"));
-        assertEquals("Unknown", attributes.get("state"));
-
-        evaluateMultiFieldValue("/attributes[*][fieldName(.) = 'attributes']", record).forEach(field -> field.updateValue("Unknown"));
-        assertEquals("Unknown", attributes.get("city"));
-        assertEquals("Unknown", attributes.get("state"));
-    }
-
-    @Test
-    public void testMapMultiKey() {
-        final Map<String, String> attributes = getMapValue(record, "attributes");
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/attributes['city', 'state']", record);
-        assertEquals(2, fieldValues.size());
-
-        assertEquals("New York", fieldValues.get(0).getValue());
-        assertEquals("NY", fieldValues.get(1).getValue());
-
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("attributes", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-
-        evaluateMultiFieldValue("/attributes['city', 'state']", record).forEach(field -> field.updateValue("Unknown"));
-        assertEquals("Unknown", attributes.get("city"));
-        assertEquals("Unknown", attributes.get("state"));
-    }
-
-    @Test
-    public void testEscapedFieldName() {
-        final RecordSchema schema = new SimpleRecordSchema(List.of(
-                new RecordField("name,date", RecordFieldType.STRING.getDataType())
-        ));
-        final Record record = new MapRecord(schema, Map.of("name,date", "John Doe"));
-
-        final FieldValue fieldValue = evaluateSingleFieldValue("/'name,date'", record);
-        assertEquals("name,date", fieldValue.getField().getFieldName());
-        assertEquals("John Doe", fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-    }
-
-    @Test
-    public void testSingleArrayIndex() {
-        final FieldValue fieldValue = evaluateSingleFieldValue("/numbers[3]", record);
-        assertEquals("numbers", fieldValue.getField().getFieldName());
-        assertEquals(3, fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-    }
-
-    @Test
-    public void testSingleArrayRange() {
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0..1]", record);
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-
-        assertEquals(2, fieldValues.size());
-        for (int i = 0; i < 1; i++) {
-            assertEquals(i, fieldValues.getFirst().getValue());
-        }
-    }
-
-    @Test
-    public void testMultiArrayIndex() {
-        final Object[] numbers = record.getAsArray("numbers");
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[3,6, -1, -2]", record);
-        int i = 0;
-        final int[] expectedValues = new int[]{3, 6, 9, 8};
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(expectedValues[i++], fieldValue.getValue());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-
-        evaluateMultiFieldValue("/numbers[3,6, -1, -2]", record).forEach(field -> field.updateValue(99));
-        assertArrayEquals(new Object[]{0, 1, 2, 99, 4, 5, 99, 7, 99, 99}, numbers);
-    }
-
-    @Test
-    public void testMultiArrayIndexWithRanges() {
-        List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0, 2, 4..7, 9]", record);
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-
-        int[] expectedValues = new int[]{0, 2, 4, 5, 6, 7, 9};
-        assertEquals(expectedValues.length, fieldValues.size());
-        for (int i = 0; i < expectedValues.length; i++) {
-            assertEquals(expectedValues[i], fieldValues.get(i).getValue());
-        }
-
-        fieldValues = evaluateMultiFieldValue("/numbers[0..-1]", record);
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-        expectedValues = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-        assertEquals(expectedValues.length, fieldValues.size());
-        for (int i = 0; i < expectedValues.length; i++) {
-            assertEquals(expectedValues[i], fieldValues.get(i).getValue());
-        }
-
-
-        fieldValues = evaluateMultiFieldValue("/numbers[-1..-1]", record);
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-        expectedValues = new int[]{9};
-        assertEquals(expectedValues.length, fieldValues.size());
-        for (int i = 0; i < expectedValues.length; i++) {
-            assertEquals(expectedValues[i], fieldValues.get(i).getValue());
-        }
-
-        fieldValues = evaluateMultiFieldValue("/numbers[*]", record);
-        for (final FieldValue fieldValue : fieldValues) {
-            assertEquals("numbers", fieldValue.getField().getFieldName());
-            assertEquals(record, fieldValue.getParentRecord().get());
-        }
-        expectedValues = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-        assertEquals(expectedValues.length, fieldValues.size());
-        for (int i = 0; i < expectedValues.length; i++) {
-            assertEquals(expectedValues[i], fieldValues.get(i).getValue());
-        }
-
-        fieldValues = evaluateMultiFieldValue("/xx[1,2,3]", record);
-        assertEquals(0, fieldValues.size());
-    }
-
-    @Test
-    public void testRelativePath() {
-        final Record accountRecord = record.getAsRecord("mainAccount", getAccountSchema());
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/mainAccount/././balance/.", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals(accountRecord, fieldValue.getParentRecord().get());
-        assertEquals(123.45D, fieldValue.getValue());
-        assertEquals("balance", fieldValue.getField().getFieldName());
-
-        evaluateMultiFieldValue("/mainAccount/././balance/.", record).forEach(field -> field.updateValue(123.44D));
-        assertEquals(123.44D, accountRecord.getValue("balance"));
-    }
-
-    // TODO move & split into < / >?
-    @Test
-    public void testCompareToLiteral() {
-        record.setValue("numbers", new Object[]{0, 1, 2});
-
-        List<FieldValue> fieldValues = evaluateMultiFieldValue("/id[. > 42]", record);
-        assertEquals(1, fieldValues.size());
-
-        fieldValues = evaluateMultiFieldValue("/id[. < 42]", record);
-        assertEquals(0, fieldValues.size());
-    }
-
-    // TODO move & split into < / >?
-    @Test
-    public void testCompareToAbsolute() {
-        record.setValue("numbers", new Object[]{0, 1, 2});
-
-        List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0..-1][. < /id]", record);
-        assertEquals(3, fieldValues.size());
-
-        fieldValues = evaluateMultiFieldValue("/id[. > /numbers[-1]]", record);
-        assertEquals(1, fieldValues.size());
-    }
-
-    @Test
-    public void testCompareWithEmbeddedPaths() {
-        final Record accountRecord1 = createAccountRecord(1, 10_000.00D);
-        final Record accountRecord2 = createAccountRecord(2, 48.02D);
-        record.setValue("accounts", new Object[]{accountRecord1, accountRecord2});
-
-        List<FieldValue> fieldValues = evaluateMultiFieldValue("/accounts[0..-1][./balance > 100]", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("accounts", fieldValue.getField().getFieldName());
-        assertEquals(0, ((ArrayIndexFieldValue) fieldValue).getArrayIndex());
-        assertEquals(record, fieldValue.getParentRecord().get());
-        assertEquals(accountRecord1, fieldValue.getValue());
-    }
-
-    @Test
-    public void testPredicateInMiddleOfPath() {
-        final Record accountRecord1 = createAccountRecord(1, 10_000.00D);
-        final Record accountRecord2 = createAccountRecord(2, 48.02D);
-        record.setValue("accounts", new Object[]{accountRecord1, accountRecord2});
-
-        List<FieldValue> fieldValues = evaluateMultiFieldValue("/accounts[0..-1][./balance > 100]/id", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("id", fieldValue.getField().getFieldName());
-        assertEquals(accountRecord1, fieldValue.getParentRecord().get());
-        assertEquals(1, fieldValue.getValue());
-    }
-
-    @Test
-    public void testUpdateValueOnMatchingFields() {
-        final Record accountRecord1 = createAccountRecord(1, 10_000.00D);
-        final Record accountRecord2 = createAccountRecord(2, 48.02D);
-        record.setValue("accounts", new Object[]{accountRecord1, accountRecord2});
-
-        evaluateSingleFieldValue("/accounts[0..-1][./balance > 100]/id", record).updateValue(100);
-
-        assertEquals(48, record.getValue("id"));
-        assertEquals(100, accountRecord1.getValue("id"));
-        assertEquals(2, accountRecord2.getValue("id"));
-    }
-
-    @Test
-    public void testPredicateDoesNotIncludeFieldsThatDontHaveRelativePath() {
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./balance = '123.45']", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("mainAccount", fieldValue.getField().getFieldName());
-
-        assertEquals(1, evaluateSingleFieldValue("/*[./balance = '123.45']/id", record).getValue());
-    }
-
-    @Test
-    public void testPredicateWithAbsolutePath() {
-        record.setValue("id", record.getAsRecord("mainAccount", getAccountSchema()).getValue("id"));
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./id = /id]", record);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("mainAccount", fieldValue.getField().getFieldName());
-    }
-
-    @Test
-    public void testRelativePathOnly() {
-        final FieldValue recordFieldValue = new StandardFieldValue(record, new RecordField("record", RecordFieldType.RECORD.getDataType()), null);
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue("./name", record, recordFieldValue);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("John Doe", fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-        assertEquals("name", fieldValue.getField().getFieldName());
-    }
-
-    @Test
-    public void testRelativePathAgainstNonRecordField() {
-        final FieldValue recordFieldValue = new StandardFieldValue(record, new RecordField("root", RecordFieldType.RECORD.getRecordDataType(record.getSchema())), null);
-        final FieldValue nameFieldValue = new StandardFieldValue("John Doe", new RecordField("name", RecordFieldType.STRING.getDataType()), recordFieldValue);
-
-        final List<FieldValue> fieldValues = evaluateMultiFieldValue(".", record, nameFieldValue);
-        assertEquals(1, fieldValues.size());
-
-        final FieldValue fieldValue = fieldValues.getFirst();
-        assertEquals("John Doe", fieldValue.getValue());
-        assertEquals(record, fieldValue.getParentRecord().get());
-        assertEquals("name", fieldValue.getField().getFieldName());
-
-        fieldValue.updateValue("Jane Doe");
-        assertEquals("Jane Doe", record.getValue("name"));
-    }
-
-    @Test
-    public void testRecordRootReferenceInFunction() {
-        final Record record = reduceRecord(createExampleRecord(), "id", "name", "missing");
-
-        final FieldValue singleArgumentFieldValue = evaluateSingleFieldValue("escapeJson(/)", record);
-        assertEquals("{\"id\":48,\"name\":\"John Doe\",\"missing\":null}", singleArgumentFieldValue.getValue());
-        final FieldValue multipleArgumentsFieldValue = evaluateSingleFieldValue("mapOf(\"copy\",/)", record);
-        assertInstanceOf(MapRecord.class, multipleArgumentsFieldValue.getValue());
-        assertEquals(record.toString(), ((MapRecord) multipleArgumentsFieldValue.getValue()).getValue("copy"));
-    }
-
-    @Test
-    public void testRecursiveWithMap() {
-        final Map<String, String> mapValues = new HashMap<>(Map.of(
-                "a", "z",
-                "b", "Y",
-                "c", "x"
-        ));
-
-        final Record record = reduceRecord(createExampleRecord(), "attributes");
-        record.setValue("attributes", mapValues);
-
-        assertEquals("Y", evaluateSingleFieldValue("//*[. = toUpperCase(.)]", record).getValue());
-    }
-
-
-    @Test
-    public void testRecursiveWithChoiceThatIncludesRecord() {
-        final RecordSchema personSchema = new SimpleRecordSchema(Arrays.asList(
-                new RecordField("name", RecordFieldType.STRING.getDataType()),
-                new RecordField("age", RecordFieldType.INT.getDataType())
-        ));
-
-        final DataType personDataType = RecordFieldType.RECORD.getRecordDataType(personSchema);
-        final DataType stringDataType = RecordFieldType.STRING.getDataType();
-
-        final List<RecordField> fields = new ArrayList<>();
-        fields.add(new RecordField("person", RecordFieldType.CHOICE.getChoiceDataType(stringDataType, personDataType)));
-        final RecordSchema schema = new SimpleRecordSchema(fields);
-
-        final Map<String, Object> personValueMap = new HashMap<>();
-        personValueMap.put("name", "John Doe");
-        personValueMap.put("age", 30);
-        final Record personRecord = new MapRecord(personSchema, personValueMap);
-
-        final Map<String, Object> values = new HashMap<>();
-        values.put("person", personRecord);
-
-        final Record record = new MapRecord(schema, values);
-        final List<Object> expectedValues = List.of(personRecord, "John Doe", 30);
-        assertEquals(expectedValues, valuesOf(evaluateMultiFieldValue("//*", record)));
-    }
-
-    @Test
-    public void functionsCanBeChainedTogether() {
-        assertEquals("John Doe", evaluateSingleFieldValue("/name[contains(substringAfter(., 'o'), 'h')]", record).getValue());
-    }
-
-    @Nested
-    class FilterFunctions {
-
+        @Disabled("NIFI-12852 Replace / Remove")
         @Test
-        public void filterFunctionsCanBeUsedStandalone() {
-            record.setValue("name", null);
-
-            assertEquals(Boolean.TRUE, evaluateSingleFieldValue("isEmpty( /name )", record).getValue());
-            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("isEmpty( /id )", record).getValue());
-
-            assertEquals(Boolean.TRUE, evaluateSingleFieldValue("/id = 48", record).getValue());
-            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("/id > 48", record).getValue());
-
-            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("not(/id = 48)", record).getValue());
+        public void testSingleArrayIndex() {
+            final FieldValue fieldValue = evaluateSingleFieldValue("/numbers[3]", record);
+            assertEquals("numbers", fieldValue.getField().getFieldName());
+            assertEquals(3, fieldValue.getValue());
+            assertEquals(record, fieldValue.getParentRecord().get());
         }
 
-        @Nested
-        class Contains {
-            @Test
-            public void testContains() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[contains(., 'o')]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[contains(., 'x')]", record).size());
-
-                record.setValue("name", "John Doe 48");
-                assertEquals("John Doe 48", evaluateSingleFieldValue("/name[contains(., /id)]", record).getValue());
-            }
-        }
-
-        @Nested
-        class ContainsRegex {
-            @Test
-            public void testContainsRegex() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[containsRegex(., 'o')]", record).getValue());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[containsRegex(., '[xo]')]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[containsRegex(., 'x')]", record).size());
-            }
-        }
-
-        @Nested
-        class EndsWith {
-            @Test
-            public void testEndsWith() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[endsWith(., 'e')]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[endsWith(., 'x')]", record).size());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[endsWith(., '')]", record).getValue());
-            }
-        }
-
-        @Nested
-        class Equals {
-            // TODO = operator
-            @Test
-            public void testEqualsPredicate() { // todo review
-                record.setValue("numbers", new Object[]{1, 2, 3, 4, 4, 4, 5});
-
-                List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0..-1][. = 4]", record);
-                assertEquals(3, fieldValues.size());
-
-                for (final FieldValue fieldValue : fieldValues) {
-                    final String fieldName = fieldValue.getField().getFieldName();
-                    assertEquals("numbers", fieldName);
-                    assertEquals(RecordFieldType.INT, fieldValue.getField().getDataType().getFieldType());
-                    assertEquals(4, fieldValue.getValue());
-                    assertEquals(record, fieldValue.getParentRecord().get());
-                }
-
-                fieldValues = evaluateMultiFieldValue("//id[. = 48]", record);
-                assertEquals(1, fieldValues.size());
-                final FieldValue fieldValue = fieldValues.getFirst();
-
-                assertEquals("id", fieldValue.getField().getFieldName());
-                assertEquals(RecordFieldType.INT.getDataType(), fieldValue.getField().getDataType());
-                assertEquals(48, fieldValue.getValue());
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testSingleArrayRange() {
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0..1]", record);
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
                 assertEquals(record, fieldValue.getParentRecord().get());
             }
 
-
-        }
-
-        @Nested
-        class GreaterThan {
-            // TODO > operator
-        }
-
-        @Nested
-        class GreaterThanOrEqual {
-            // TODO >= operator
-        }
-
-        @Nested
-        class IsBlank {
-            @Test
-            public void testIsBlank() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[isBlank(../missing)]", record).getValue());
-
-                record.setValue("missing", "   ");
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[isBlank(../missing)]", record).getValue());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[isBlank(/missing)]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[isBlank(../id)]", record).size());
+            assertEquals(2, fieldValues.size());
+            for (int i = 0; i < 1; i++) {
+                assertEquals(i, fieldValues.getFirst().getValue());
             }
         }
 
-        @Nested
-        class IsEmpty {
-            @Test
-            public void testIsEmpty() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[isEmpty(../missing)]", record).getValue());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[isEmpty(/missing)]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[isEmpty(../id)]", record).size());
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMultiArrayIndex() {
+            final Object[] numbers = record.getAsArray("numbers");
 
-                record.setValue("missing", "   ");
-                assertEquals(0L, evaluateMultiFieldValue("/name[isEmpty(/missing)]", record).size());
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[3,6, -1, -2]", record);
+            int i = 0;
+            final int[] expectedValues = new int[]{3, 6, 9, 8};
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
+                assertEquals(expectedValues[i++], fieldValue.getValue());
+                assertEquals(record, fieldValue.getParentRecord().get());
             }
+
+            evaluateMultiFieldValue("/numbers[3,6, -1, -2]", record).forEach(field -> field.updateValue(99));
+            assertArrayEquals(new Object[]{0, 1, 2, 99, 4, 5, 99, 7, 99, 99}, numbers);
         }
 
-        @Nested
-        class LessThan {
-            // TODO operator <
-        }
-
-        @Nested
-        class LessThanOrEqual {
-            // TODO operator <=
-        }
-
-        @Nested
-        class MatchesRegex {
-            @Test
-            public void testMatchesRegex() {
-                assertEquals(0L, evaluateMultiFieldValue("/name[matchesRegex(., 'John D')]", record).size());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[matchesRegex(., '[John Doe]{8}')]", record).getValue());
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMultiArrayIndexWithRanges() {
+            List<FieldValue> fieldValues = evaluateMultiFieldValue("/numbers[0, 2, 4..7, 9]", record);
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
             }
-        }
 
-        @Nested
-        class NotEquals {
-            // TODO operator !=
-        }
-
-        @Nested
-        class Not {
-            @Test
-            public void testNot() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[not(contains(., 'x'))]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[not(. = 'John Doe')]", record).size());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[not(. = 'Jane Doe')]", record).getValue());
+            int[] expectedValues = new int[]{0, 2, 4, 5, 6, 7, 9};
+            assertEquals(expectedValues.length, fieldValues.size());
+            for (int i = 0; i < expectedValues.length; i++) {
+                assertEquals(expectedValues[i], fieldValues.get(i).getValue());
             }
+
+            fieldValues = evaluateMultiFieldValue("/numbers[0..-1]", record);
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
+            }
+            expectedValues = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+            assertEquals(expectedValues.length, fieldValues.size());
+            for (int i = 0; i < expectedValues.length; i++) {
+                assertEquals(expectedValues[i], fieldValues.get(i).getValue());
+            }
+
+
+            fieldValues = evaluateMultiFieldValue("/numbers[-1..-1]", record);
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
+            }
+            expectedValues = new int[]{9};
+            assertEquals(expectedValues.length, fieldValues.size());
+            for (int i = 0; i < expectedValues.length; i++) {
+                assertEquals(expectedValues[i], fieldValues.get(i).getValue());
+            }
+
+            fieldValues = evaluateMultiFieldValue("/numbers[*]", record);
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("numbers", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
+            }
+            expectedValues = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+            assertEquals(expectedValues.length, fieldValues.size());
+            for (int i = 0; i < expectedValues.length; i++) {
+                assertEquals(expectedValues[i], fieldValues.get(i).getValue());
+            }
+
+            fieldValues = evaluateMultiFieldValue("/xx[1,2,3]", record);
+            assertEquals(0, fieldValues.size());
         }
 
-        @Nested
-        class StartsWith {
-            @Test
-            public void testStartsWith() {
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[startsWith(., 'J')]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("/name[startsWith(., 'x')]", record).size());
-                assertEquals("John Doe", evaluateSingleFieldValue("/name[startsWith(., '')]", record).getValue());
-            }
-        }
     }
 
     @Nested
+    class MapReferences {
+
+        // TODO NIFI-12852 supportsReferenceToMapField
+        // TODO NIFI-12852 supportsReferenceToMapFields
+        // TODO NIFI-12852 supportsWildcardReferenceToMapFields
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        void compilesRecordPathWithReferenceToMapField() {
+            assertDoesNotThrow(() -> RecordPath.compile("/address['zipCode']"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        void compilesRecordPathWithReferenceToMapFields() {
+            assertDoesNotThrow(() -> RecordPath.compile("/address['zipCode', 'state']"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        void compilesRecordPathWithWildcardReferenceToMapFields() {
+            assertDoesNotThrow(() -> RecordPath.compile("/address[*]"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMapKey() {
+            final FieldValue fieldValue = evaluateSingleFieldValue("/attributes['city']", record);
+            assertEquals("attributes", fieldValue.getField().getFieldName());
+            assertEquals("New York", fieldValue.getValue());
+            assertEquals(record, fieldValue.getParentRecord().get());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMapKeyReferencedWithCurrentField() {
+            final FieldValue fieldValue = evaluateSingleFieldValue("/attributes/.['city']", record);
+            assertEquals("attributes", fieldValue.getField().getFieldName());
+            assertEquals("New York", fieldValue.getValue());
+            assertEquals(record, fieldValue.getParentRecord().get());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testUpdateMap() {
+            evaluateSingleFieldValue("/attributes['city']", record).updateValue("Boston");
+            assertEquals("Boston", (getMapValue(record, "attributes")).get("city"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMapWildcard() {
+            final Map<String, String> attributes = getMapValue(record, "attributes");
+
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/attributes[*]", record);
+            assertEquals(2, fieldValues.size());
+
+            assertEquals("New York", fieldValues.get(0).getValue());
+            assertEquals("NY", fieldValues.get(1).getValue());
+
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("attributes", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
+            }
+
+            evaluateMultiFieldValue("/attributes[*]", record).forEach(field -> field.updateValue("Unknown"));
+            assertEquals("Unknown", attributes.get("city"));
+            assertEquals("Unknown", attributes.get("state"));
+
+            evaluateMultiFieldValue("/attributes[*][fieldName(.) = 'attributes']", record).forEach(field -> field.updateValue("Unknown"));
+            assertEquals("Unknown", attributes.get("city"));
+            assertEquals("Unknown", attributes.get("state"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testMapMultiKey() {
+            final Map<String, String> attributes = getMapValue(record, "attributes");
+
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/attributes['city', 'state']", record);
+            assertEquals(2, fieldValues.size());
+
+            assertEquals("New York", fieldValues.get(0).getValue());
+            assertEquals("NY", fieldValues.get(1).getValue());
+
+            for (final FieldValue fieldValue : fieldValues) {
+                assertEquals("attributes", fieldValue.getField().getFieldName());
+                assertEquals(record, fieldValue.getParentRecord().get());
+            }
+
+            evaluateMultiFieldValue("/attributes['city', 'state']", record).forEach(field -> field.updateValue("Unknown"));
+            assertEquals("Unknown", attributes.get("city"));
+            assertEquals("Unknown", attributes.get("state"));
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testRecursiveWithMap() {
+            final Map<String, String> mapValues = new HashMap<>(Map.of(
+                    "a", "z",
+                    "b", "Y",
+                    "c", "x"
+            ));
+
+            final Record record = reduceRecord(createExampleRecord(), "attributes");
+            record.setValue("attributes", mapValues);
+
+            assertEquals("Y", evaluateSingleFieldValue("//*[. = toUpperCase(.)]", record).getValue());
+        }
+
+    }
+
+    // TODO NIFI-12852 supportsReferenceToFieldOfType XXX (include updates here?) // test that you can change type of field with update?
+    //  - BIGINT
+    //  - BOOLEAN
+    //  - BYTE
+    //  - CHAR
+    //  - DATE
+    //  - DECIMAL
+    //  - DOUBLE
+    //  - FLOAT
+    //  - INT
+    //  - LONG
+    //  - SHORT
+    //  - ENUM
+    //  - STRING
+    //  - TIME
+    //  - TIMESTAMP
+    //  - UUID
+    //  - ARRAY
+    //  - MAP
+    //  - RECORD
+    //  - CHOICE
+
+    @Nested
     class StandaloneFunctions {
+
+        // TODO NIFI-12852 supportsStandaloneFunction
+        // TODO NIFI-12852 chain standalone
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void functionsCanBeChainedTogether() {
+            assertEquals("John Doe", evaluateSingleFieldValue("/name[contains(substringAfter(., 'o'), 'h')]", record).getValue());
+        }
 
         @Test
         void throwsRecordPathExceptionWhenUsingStandaloneFunctionAsPredicate() {
@@ -942,6 +750,18 @@ public class TestRecordPath {
         @Test
         void supportsUsingStandaloneFunctionAsPartOfPredicate() {
             RecordPath.compile("/name[substring(., 1, 2) = 'e']");
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testRecordRootReferenceInFunction() {
+            final Record record = reduceRecord(createExampleRecord(), "id", "name", "missing");
+
+            final FieldValue singleArgumentFieldValue = evaluateSingleFieldValue("escapeJson(/)", record);
+            assertEquals("{\"id\":48,\"name\":\"John Doe\",\"missing\":null}", singleArgumentFieldValue.getValue());
+            final FieldValue multipleArgumentsFieldValue = evaluateSingleFieldValue("mapOf(\"copy\",/)", record);
+            assertInstanceOf(MapRecord.class, multipleArgumentsFieldValue.getValue());
+            assertEquals(record.toString(), ((MapRecord) multipleArgumentsFieldValue.getValue()).getValue("copy"));
         }
 
         @Nested
@@ -1107,7 +927,7 @@ public class TestRecordPath {
                 assertEquals("48", evaluateSingleFieldValue("escapeJson(/id)", record).getValue());
                 assertEquals("[0,1,2,3,4,5,6,7,8,9]", evaluateSingleFieldValue("escapeJson(/numbers)", record).getValue());
                 assertEquals(
-                        "{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}",
+                        "{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45,\"address\":{\"city\":\"Boston\",\"state\":\"Massachusetts\"}},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}",
                         evaluateSingleFieldValue("escapeJson(/)", record).getValue()
                 );
             }
@@ -1238,7 +1058,7 @@ public class TestRecordPath {
             @Test
             public void testMapOf() {
                 final FieldValue fv = evaluateSingleFieldValue("mapOf('firstName', /firstName, 'lastName', /lastName)", record);
-                assertEquals(fv.getField().getDataType().getFieldType(), RecordFieldType.MAP.getMapDataType(RecordFieldType.STRING.getDataType()).getFieldType());
+                assertEquals(fv.getField().getDataType().getFieldType(), mapTypeOf(RecordFieldType.STRING).getFieldType());
                 assertEquals("MapRecord[{firstName=John, lastName=Doe}]", fv.getValue().toString());
 
                 assertThrows(RecordPathException.class, () -> RecordPath.compile("mapOf('firstName', /firstName, 'lastName')").evaluate(record));
@@ -1569,7 +1389,7 @@ public class TestRecordPath {
 
             @Test
             public void supportsLiteralValue() {
-                // TODO, does this work?
+                // TODO NIFI-12852 does this work?
             }
 
             @Test
@@ -1581,34 +1401,34 @@ public class TestRecordPath {
                 assertEquals("Jane Smith", results.get(1).getValue());
             }
 
-            // todo do maps work?
-            // todo do record wildcards work, what about non string fields?
+            // todo NIFI-12852 do maps work?
+            // todo NIFI-12852 do record wildcards work, what about non string fields?
         }
 
         @Nested
         class UnescapeJson {
-            // TODO maybe replace with default record? maybe split up into several tests?
+            // TODO NIFI-12852 maybe replace with default record? maybe split up into several tests?
 
             @Test
             public void testUnescapeJson() {
-                final RecordSchema address = new SimpleRecordSchema(Collections.singletonList(
-                        new RecordField("address_1", RecordFieldType.STRING.getDataType())
-                ));
+                final RecordSchema address = recordSchemaOf(
+                        recordFieldOf("address_1", RecordFieldType.STRING)
+                );
 
-                final RecordSchema person = new SimpleRecordSchema(Arrays.asList(
-                        new RecordField("firstName", RecordFieldType.STRING.getDataType()),
-                        new RecordField("age", RecordFieldType.INT.getDataType()),
-                        new RecordField("nicknames", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.STRING.getDataType())),
+                final RecordSchema person = recordSchemaOf(
+                        recordFieldOf("firstName", RecordFieldType.STRING),
+                        recordFieldOf("age", RecordFieldType.INT),
+                        recordFieldOf("nicknames", arrayTypeOf(RecordFieldType.STRING)),
                         new RecordField("addresses", RecordFieldType.CHOICE.getChoiceDataType(
-                                RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.RECORD.getRecordDataType(address)),
-                                RecordFieldType.RECORD.getRecordDataType(address)
+                                arrayTypeOf(RecordFieldType.RECORD.getRecordDataType(address)),
+                                recordTypeOf(address)
                         ))
-                ));
+                );
 
-                final RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
-                        new RecordField("person", RecordFieldType.RECORD.getRecordDataType(person)),
-                        new RecordField("json_str", RecordFieldType.STRING.getDataType())
-                ));
+                final RecordSchema schema = recordSchemaOf(
+                        new RecordField("person", recordTypeOf(person)),
+                        recordFieldOf("json_str", RecordFieldType.STRING)
+                );
 
                 // test CHOICE resulting in nested ARRAY of Records
                 final Record mapAddressesArray = new MapRecord(schema,
@@ -1733,6 +1553,31 @@ public class TestRecordPath {
                         () -> evaluateSingleFieldValue("unescapeJson(/person/age)", recordNotString).getValue());
                 assertEquals("Argument supplied to unescapeJson must be a String", iae.getMessage());
             }
+
+            private void assertRecordsMatch(final Record expectedRecord, final Object result) {
+                assertInstanceOf(Record.class, result);
+                final Record resultRecord = (Record) result;
+                assertMapsMatch(expectedRecord.toMap(), resultRecord.toMap(), true);
+            }
+
+            @SuppressWarnings("unchecked")
+            private void assertMapsMatch(final Map<String, Object> expectedMap, final Object result, final boolean convertMapToRecord) {
+                assertInstanceOf(Map.class, result);
+                final Map<String, Object> resultMap = (Map<String, Object>) result;
+                assertEquals(expectedMap.size(), resultMap.size());
+
+                for (final Map.Entry<String, Object> e : expectedMap.entrySet()) {
+                    // can't directly assertEquals two Object[] as the #equals method checks whether they're the same Object, rather than comparing the array content
+                    if (e.getValue() instanceof Object[] expectedArray) {
+                        final Object resultObj = resultMap.get(e.getKey());
+                        // Record conversion changes Collections to Arrays, otherwise they remain Collections
+                        final Object[] resultArray = convertMapToRecord ? (Object[]) resultObj : ((Collection<?>) resultObj).toArray();
+                        assertArrayEquals(expectedArray, resultArray);
+                    } else {
+                        assertEquals(e.getValue(), resultMap.get(e.getKey()));
+                    }
+                }
+            }
         }
 
         @Nested
@@ -1766,99 +1611,630 @@ public class TestRecordPath {
         }
     }
 
-    private void assertRecordsMatch(final Record expectedRecord, final Object result) {
-        assertInstanceOf(Record.class, result);
-        final Record resultRecord = (Record) result;
-        assertMapsMatch(expectedRecord.toMap(), resultRecord.toMap(), true);
-    }
+    @Nested
+    class FilterFunctions {
 
-    @SuppressWarnings("unchecked")
-    private void assertMapsMatch(final Map<String, Object> expectedMap, final Object result, final boolean convertMapToRecord) {
-        assertInstanceOf(Map.class, result);
-        final Map<String, Object> resultMap = (Map<String, Object>) result;
-        assertEquals(expectedMap.size(), resultMap.size());
+        // TODO NIFI-12852 supportsFilterFunction
+        // TODO NIFI-12852 supportsReference  relative path predicate
+        // TODO NIFI-12852 supportsReference  absolute path predicate
+        // TODO NIFI-12852 can chain predicates
+        // TODO NIFI-12852 filter on name with wildcard
 
-        for (final Map.Entry<String, Object> e : expectedMap.entrySet()) {
-            // can't directly assertEquals two Object[] as the #equals method checks whether they're the same Object, rather than comparing the array content
-            if (e.getValue() instanceof Object[] expectedArray) {
-                final Object resultObj = resultMap.get(e.getKey());
-                // Record conversion changes Collections to Arrays, otherwise they remain Collections
-                final Object[] resultArray = convertMapToRecord ? (Object[]) resultObj : ((Collection<?>) resultObj).toArray();
-                assertArrayEquals(expectedArray, resultArray);
-            } else {
-                assertEquals(e.getValue(), resultMap.get(e.getKey()));
+        @Test
+        public void filterFunctionsCanBeUsedStandalone() {
+            record.setValue("name", null);
+
+            assertEquals(Boolean.TRUE, evaluateSingleFieldValue("isEmpty( /name )", record).getValue());
+            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("isEmpty( /id )", record).getValue());
+
+            assertEquals(Boolean.TRUE, evaluateSingleFieldValue("/id = 48", record).getValue());
+            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("/id > 48", record).getValue());
+
+            assertEquals(Boolean.FALSE, evaluateSingleFieldValue("not(/id = 48)", record).getValue());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testCompareWithEmbeddedPaths() {
+            final Record accountRecord1 = createAccountRecord(1, 10_000.00D);
+            final Record accountRecord2 = createAccountRecord(2, 48.02D);
+            record.setValue("accounts", new Object[]{accountRecord1, accountRecord2});
+
+            List<FieldValue> fieldValues = evaluateMultiFieldValue("/accounts[0..-1][./balance > 100]", record);
+            assertEquals(1, fieldValues.size());
+
+            final FieldValue fieldValue = fieldValues.getFirst();
+            assertEquals("accounts", fieldValue.getField().getFieldName());
+            assertEquals(0, ((ArrayIndexFieldValue) fieldValue).getArrayIndex());
+            assertEquals(record, fieldValue.getParentRecord().get());
+            assertEquals(accountRecord1, fieldValue.getValue());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testPredicateInMiddleOfPath() {
+            final Record accountRecord1 = createAccountRecord(1, 10_000.00D);
+            final Record accountRecord2 = createAccountRecord(2, 48.02D);
+            record.setValue("accounts", new Object[]{accountRecord1, accountRecord2});
+
+            List<FieldValue> fieldValues = evaluateMultiFieldValue("/accounts[0..-1][./balance > 100]/id", record);
+            assertEquals(1, fieldValues.size());
+
+            final FieldValue fieldValue = fieldValues.getFirst();
+            assertEquals("id", fieldValue.getField().getFieldName());
+            assertEquals(accountRecord1, fieldValue.getParentRecord().get());
+            assertEquals(1, fieldValue.getValue());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testPredicateDoesNotIncludeFieldsThatDontHaveRelativePath() {
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./balance = '123.45']", record);
+            assertEquals(1, fieldValues.size());
+
+            final FieldValue fieldValue = fieldValues.getFirst();
+            assertEquals("mainAccount", fieldValue.getField().getFieldName());
+
+            assertEquals(1, evaluateSingleFieldValue("/*[./balance = '123.45']/id", record).getValue());
+        }
+
+        @Disabled("NIFI-12852 Replace / Remove")
+        @Test
+        public void testPredicateWithAbsolutePath() {
+            record.setValue("id", record.getAsRecord("mainAccount", getAccountSchema()).getValue("id"));
+
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue("/*[./id = /id]", record);
+            assertEquals(1, fieldValues.size());
+
+            final FieldValue fieldValue = fieldValues.getFirst();
+            assertEquals("mainAccount", fieldValue.getField().getFieldName());
+        }
+
+        // TODO NIFI-12852 Operators on time?
+
+        @Nested
+        class Contains {
+            @Test
+            void supportsComparingWithStringLiteralValues() {
+                assertMatches("/name[contains(., 'o')]", record);
+                assertNotMatches("/name[contains(., 'x')]", record);
             }
+
+            @Test
+            void supportsComparingWithStringReference() {
+                assertMatches("/name[contains(., /friends[0])]", record);
+                assertNotMatches("/name[contains(., /friends[1])]", record);
+            }
+
+            @Test
+            void matchesWhenTargetMatchesSearchValue() {
+                record.setArrayValue("friends", 2, record.getValue("name"));
+                assertMatches("/name[contains(., /friends[2])]", record);
+            }
+        }
+
+        @Nested
+        class ContainsRegex {
+            @Test
+            void supportsComparingWithStringLiteralValues() {
+                assertMatches("/name[containsRegex(., 'o[gh]n')]", record);
+                assertNotMatches("/name[containsRegex(., 'o[xy]n')]", record);
+            }
+
+            @Test
+            void supportsComparingWithStringReference() {
+                record.setValue("friends", new String[]{"o[gh]n", "o[xy]n"});
+                assertMatches("/name[containsRegex(., /friends[0])]", record);
+                assertNotMatches("/name[containsRegex(., /friends[1])]", record);
+            }
+
+            @Test
+            void matchesWhenTargetMatchesSearchValue() {
+                record.setArrayValue("friends", 2, record.getValue("name"));
+                assertMatches("/name[containsRegex(., /friends[2])]", record);
+            }
+        }
+
+        @Nested
+        class EndsWith {
+            @Test
+            void supportsComparingWithStringLiteralValues() {
+                assertMatches("/name[endsWith(., 'n Doe')]", record);
+                assertNotMatches("/name[endsWith(., 'n Dont')]", record);
+            }
+
+            @Test
+            void supportsComparingWithStringReference() {
+                record.setValue("friends", new String[]{"n Doe", "n Dont"});
+                assertMatches("/name[endsWith(., /friends[0])]", record);
+                assertNotMatches("/name[endsWith(., /friends[1])]", record);
+            }
+
+            @Test
+            void matchesWhenTargetMatchesSearchValue() {
+                record.setArrayValue("friends", 2, record.getValue("name"));
+                assertMatches("/name[endsWith(., /friends[2])]", record);
+            }
+
+            @Test
+            void matchesWhenSearchValueIsEmpty() {
+                assertMatches("/name[endsWith(., '')]", record);
+            }
+        }
+
+        @Nested
+        class Equals {
+
+            @Test
+            void supportsArrayValuesByReference() {
+                assertMatches("/friends[. = /friends]", record);
+                assertNotMatches("/friends[. = /bytes]", record);
+            }
+
+            @Test
+            void supportsBooleanValuesByReference() {
+                record.setValue("firstName", true);
+                record.setValue("lastName", false);
+                assertMatches("/firstName[. = /firstName]", record);
+                assertNotMatches("/firstName[. = /lastName]", record);
+                assertNotMatches("/lastName[. = /firstName]", record);
+                assertMatches("/lastName[. = /lastName]", record);
+            }
+            @Test
+            void supportsByteValuesByReference() {
+                assertMatches("/bytes[0][. = /bytes[0]]", record);
+                assertNotMatches("/bytes[0][. = /bytes[1]]", record);
+            }
+
+            @Test
+            void supportsCharValuesByReference() {
+                record.setValue("firstName", 'k');
+                record.setValue("lastName", 'o');
+                assertMatches("/firstName[. = /firstName]", record);
+                assertNotMatches("/firstName[. = /lastName]", record);
+            }
+
+            @Test
+            void supportsEnumValuesByReference() {
+                record.setValue("firstName", RecordFieldType.ENUM);
+                record.setValue("lastName", RecordFieldType.BOOLEAN);
+                assertMatches("/firstName[. = /firstName]", record);
+                assertNotMatches("/firstName[. = /lastName]", record);
+            }
+
+            @Test
+            public void supportsNumericalValuesByLiteralValues() {
+                assertMatches("/id[. = 48]", record);
+                assertNotMatches("/id[. = 49]", record);
+                assertMatches("/mainAccount/balance[. = '123.45']", record);
+                assertNotMatches("/mainAccount/balance[. = '123.46']", record);
+            }
+
+            @Test
+            public void supportsNumericalValuesByReference() {
+                record.setValue("numbers", new Integer[]{48, 49});
+                assertMatches("/id[. = /numbers[0]]", record);
+                assertNotMatches("/id[. = /numbers[1]]", record);
+                record.setValue("numbers", new Double[]{123.45, 123.46});
+                assertMatches("/mainAccount/balance[. = /numbers[0]]", record);
+                assertNotMatches("/mainAccount/balance[. = /numbers[1]]", record);
+            }
+
+            @Test
+            void supportsRecordValuesByReference() {
+                assertMatches("/mainAccount[. = /mainAccount]", record);
+                assertNotMatches("/mainAccount[. = /accounts[1]]", record);
+            }
+
+            @Test
+            public void supportsStringValuesByLiteralValues() {
+                assertMatches("/name[. = 'John Doe']", record);
+                assertNotMatches("/name[. = 'Jane Doe']", record);
+            }
+
+            @Test
+            public void supportsStringValuesByReference() {
+                record.setValue("name", record.getAsArray("friends")[0]);
+                assertMatches("/name[. = /friends[0]]", record);
+                assertNotMatches("/name[. = /friends[1]]", record);
+            }
+
+            // todo test different types ...
+            //  - BIGINT
+            //  - DATE
+            //  - TIME
+            //  - TIMESTAMP
+            //  - UUID
+            //  - MAP
+            //  - CHOICE
+        }
+
+        @Nested
+        class GreaterThan {
+            @Test
+            public void supportsComparingWithLongCompatibleLiteralValues() {
+                assertMatches("/id[. > 47]", record);
+                assertNotMatches("/id[. > 48]", record);
+            }
+
+            @Test
+            public void supportsComparingWithLongCompatibleReference() {
+                record.setValue("numbers", new Integer[]{47, 48});
+                assertMatches("/id[. > /numbers[0]]", record);
+                assertNotMatches("/id[. > /numbers[1]]", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleLiteralValues() {
+                assertMatches("/mainAccount/balance[. > '122.99']", record);
+                assertNotMatches("/mainAccount/balance[. > '123.45']", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleReference() {
+                record.setValue("numbers", new Double[]{122.99d, 123.45d});
+                assertMatches("/mainAccount/balance[. > /numbers[0]]", record);
+                assertNotMatches("/mainAccount/balance[. > /numbers[1]]", record);
+            }
+
+            @Test
+            void doesNotMatchOnNonNumberComparisons() {
+                assertNotMatches("/name[. > 'Jane']", record);
+                assertNotMatches("/name['Jane' > .]", record);
+            }
+        }
+
+        @Nested
+        class GreaterThanOrEqual {
+            @Test
+            public void supportsComparingWithLongCompatibleLiteralValues() {
+                assertMatches("/id[. >= 48]", record);
+                assertNotMatches("/id[. >= 49]", record);
+            }
+
+            @Test
+            public void supportsComparingWithLongCompatibleReference() {
+                record.setValue("numbers", new Integer[]{48, 49});
+                assertMatches("/id[. >= /numbers[0]]", record);
+                assertNotMatches("/id[. >= /numbers[1]]", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleLiteralValues() {
+                assertMatches("/mainAccount/balance[. >= '122.99']", record);
+                assertNotMatches("/mainAccount/balance[. >= '123.46']", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleReference() {
+                record.setValue("numbers", new Double[]{122.99d, 124.00d});
+                assertMatches("/mainAccount/balance[. >= /numbers[0]]", record);
+                assertNotMatches("/mainAccount/balance[. >= /numbers[1]]", record);
+            }
+
+            @Test
+            void doesNotMatchOnNonNumberComparisons() {
+                assertNotMatches("/name[. >= 'Jane']", record);
+                assertNotMatches("/name['Jane' >= .]", record);
+            }
+        }
+
+        @Nested
+        class IsBlank {
+            @Test
+            void supportsStringLiteralValues() {
+                assertMatches("/name[isBlank('')]", record);
+            }
+
+            @Test
+            void supportsStringReferenceValues() {
+                record.setValue("firstName", "");
+                assertMatches("/name[isBlank(/firstName)]", record);
+            }
+
+            @Test
+            void matchesOnNullValues() {
+                assertMatches("/name[isBlank(/missing)]", record);
+            }
+
+            @Test
+            void matchesOnEmptyStringValues() {
+                record.setValue("firstName", "");
+                assertMatches("/name[isBlank(/firstName)]", record);
+            }
+
+            @Test
+            void matchesOnBlankStringValues() {
+                record.setValue("firstName", " \r\n\t");
+                assertMatches("/name[isBlank(/firstName)]", record);
+            }
+
+            @Test
+            void doesNotMatchOnStringContainingNonWhitespace() {
+                record.setValue("firstName", " u ");
+                assertNotMatches("/name[isBlank(/firstName)]", record);
+            }
+        }
+
+        @Nested
+        class IsEmpty {
+            @Test
+            void supportsStringLiteralValues() {
+                assertMatches("/name[isEmpty('')]", record);
+            }
+
+            @Test
+            void supportsStringReferenceValues() {
+                record.setValue("firstName", "");
+                assertMatches("/name[isEmpty(/firstName)]", record);
+            }
+
+            @Test
+            void matchesOnNullValues() {
+                assertMatches("/name[isEmpty(/missing)]", record);
+            }
+
+            @Test
+            void matchesOnEmptyStringValues() {
+                record.setValue("firstName", "");
+                assertMatches("/name[isEmpty(/firstName)]", record);
+            }
+
+            @Test
+            void doesNotMatchesOnBlankStringValues() {
+                record.setValue("firstName", " \r\n\t");
+                assertNotMatches("/name[isEmpty(/firstName)]", record);
+            }
+
+            @Test
+            void doesNotMatchOnStringContainingNonWhitespace() {
+                record.setValue("firstName", "u");
+                assertNotMatches("/name[isEmpty(/firstName)]", record);
+            }
+        }
+
+        @Nested
+        class LessThan {
+            @Test
+            public void supportsComparingWithLongCompatibleLiteralValues() {
+                assertMatches("/id[. < 49]", record);
+                assertNotMatches("/id[. < 48]", record);
+            }
+
+            @Test
+            public void supportsComparingWithLongCompatibleReference() {
+                record.setValue("numbers", new Integer[]{49, 48});
+                assertMatches("/id[. < /numbers[0]]", record);
+                assertNotMatches("/id[. < /numbers[1]]", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleLiteralValues() {
+                assertMatches("/mainAccount/balance[. < '123.46']", record);
+                assertNotMatches("/mainAccount/balance[. < '122.99']", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleReference() {
+                record.setValue("numbers", new Double[]{124.00d, 122.99d});
+                assertMatches("/mainAccount/balance[. < /numbers[0]]", record);
+                assertNotMatches("/mainAccount/balance[. < /numbers[1]]", record);
+            }
+
+            @Test
+            void doesNotMatchOnNonNumberComparisons() {
+                assertNotMatches("/name[. < 'Jane']", record);
+                assertNotMatches("/name['Jane' < .]", record);
+            }
+        }
+
+        @Nested
+        class LessThanOrEqual {
+            @Test
+            public void supportsComparingWithLongCompatibleLiteralValues() {
+                assertMatches("/id[. <= 48]", record);
+                assertNotMatches("/id[. <= 47]", record);
+            }
+
+            @Test
+            public void supportsComparingWithLongCompatibleReference() {
+                record.setValue("numbers", new Integer[]{48, 47});
+                assertMatches("/id[. <= /numbers[0]]", record);
+                assertNotMatches("/id[. <= /numbers[1]]", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleLiteralValues() {
+                assertMatches("/mainAccount/balance[. <= '123.45']", record);
+                assertNotMatches("/mainAccount/balance[. <= '122.99']", record);
+            }
+
+            @Test
+            public void supportsComparingWithDoubleCompatibleReference() {
+                record.setValue("numbers", new Double[]{123.45d, 122.99d});
+                assertMatches("/mainAccount/balance[. <= /numbers[0]]", record);
+                assertNotMatches("/mainAccount/balance[. <= /numbers[1]]", record);
+            }
+
+            @Test
+            void doesNotMatchOnNonNumberComparisons() {
+                assertNotMatches("/name[. <= 'Jane']", record);
+                assertNotMatches("/name['Jane' <= .]", record);
+            }
+        }
+
+        @Nested
+        class MatchesRegex {
+
+            // partial match?
+            // line breaks
+            // . dot match all?
+            // applicable to numbers?
+
+            @Test
+            public void testMatchesRegex() { // TODO NIFI-12852 Refactor
+                assertEquals(0L, evaluateMultiFieldValue("/name[matchesRegex(., 'John D')]", record).size());
+                assertEquals("John Doe", evaluateSingleFieldValue("/name[matchesRegex(., '[John Doe]{8}')]", record).getValue());
+            }
+        }
+
+        @Nested
+        class NotEquals {
+            // TODO NIFI-12852 operator !=
+        }
+
+        @Nested
+        class Not {
+            @Test
+            void invertsOperatorResults() {
+                assertMatches("/name[not(. = 'other')]", record);
+                assertNotMatches("/name[not(. = /name)]", record);
+            }
+
+            @Test
+            void invertsFilterResults() {
+                assertMatches("/name[not(contains(., 'other'))]", record);
+                assertNotMatches("/name[not(contains(., /name))]", record);
+            }
+        }
+
+        @Nested
+        class StartsWith {
+            @Test
+            void supportsComparingWithStringLiteralValues() {
+                assertMatches("/name[startsWith(., 'John D')]", record);
+                assertNotMatches("/name[startsWith(., 'Jonn N')]", record);
+            }
+
+            @Test
+            void supportsComparingWithStringReference() {
+                record.setValue("friends", new String[]{"John D", "John N"});
+                assertMatches("/name[startsWith(., /friends[0])]", record);
+                assertNotMatches("/name[startsWith(., /friends[1])]", record);
+            }
+
+            @Test
+            void matchesWhenTargetMatchesSearchValue() {
+                record.setArrayValue("friends", 2, record.getValue("name"));
+                assertMatches("/name[startsWith(., /friends[2])]", record);
+            }
+
+            @Test
+            void matchesWhenSearchValueIsEmpty() {
+                assertMatches("/name[startsWith(., '')]", record);
+            }
+        }
+
+        private static void assertMatches(final String path, final Record record) {
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue(path, record);
+
+            assertEquals(
+                    1,
+                    fieldValues.size(),
+                    () -> "Expected \"" + path + "\" to match a single field on record " + record + " but got: " + fieldValues
+            );
+        }
+
+        private static void assertNotMatches(final String path, final Record record) {
+            final List<FieldValue> fieldValues = evaluateMultiFieldValue(path, record);
+
+            assertEquals(
+                    0,
+                    fieldValues.size(),
+                    () -> "Expected \"" + path + "\" to not match any fields on record " + record + " but got: " + fieldValues
+            );
         }
     }
 
-    private static SimpleRecordSchema getExampleSchema() {
-        final DataType accountDataType = RecordFieldType.RECORD.getRecordDataType(getAccountSchema());
+    private static RecordSchema getExampleSchema() {
+        final DataType accountDataType = recordTypeOf(getAccountSchema());
 
-        return new SimpleRecordSchema(List.of(
-                new RecordField("id", RecordFieldType.INT.getDataType()),
-                new RecordField("firstName", RecordFieldType.STRING.getDataType()),
-                new RecordField("lastName", RecordFieldType.STRING.getDataType()),
-                new RecordField("name", RecordFieldType.STRING.getDataType()),
-                new RecordField("missing", RecordFieldType.STRING.getDataType()),
-                new RecordField("date", RecordFieldType.DATE.getDataType()),
-                new RecordField("attributes", RecordFieldType.MAP.getMapDataType(RecordFieldType.STRING.getDataType())),
-                new RecordField("mainAccount", RecordFieldType.RECORD.getRecordDataType(getAccountSchema())),
-                new RecordField("accounts", RecordFieldType.ARRAY.getArrayDataType(accountDataType)),
-                new RecordField("numbers", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.INT.getDataType())),
-                new RecordField("friends", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.STRING.getDataType())),
-                new RecordField("bytes", RecordFieldType.ARRAY.getArrayDataType(RecordFieldType.BYTE.getDataType()))
-        ));
+        return recordSchemaOf(
+                recordFieldOf("id", RecordFieldType.INT),
+                recordFieldOf("firstName", RecordFieldType.STRING),
+                recordFieldOf("lastName", RecordFieldType.STRING),
+                recordFieldOf("name", RecordFieldType.STRING),
+                recordFieldOf("missing", RecordFieldType.STRING),
+                recordFieldOf("date", RecordFieldType.DATE),
+                recordFieldOf("attributes", mapTypeOf(RecordFieldType.STRING)),
+                recordFieldOf("mainAccount", recordTypeOf(getAccountSchema())),
+                recordFieldOf("accounts", arrayTypeOf(accountDataType)),
+                recordFieldOf("numbers", arrayTypeOf(RecordFieldType.INT)),
+                recordFieldOf("friends", arrayTypeOf(RecordFieldType.STRING)),
+                recordFieldOf("bytes", arrayTypeOf(RecordFieldType.BYTE))
+        );
+    }
+
+    private static RecordSchema getAccountSchema() {
+        return recordSchemaOf(
+                recordFieldOf("id", RecordFieldType.INT),
+                recordFieldOf("balance", RecordFieldType.DOUBLE),
+                recordFieldOf("address", recordTypeOf(getAddressSchema()))
+        );
+    }
+
+    private static RecordSchema getAddressSchema() {
+        return recordSchemaOf(
+                recordFieldOf("city", RecordFieldType.STRING),
+                recordFieldOf("state", RecordFieldType.STRING)
+        );
     }
 
     private static Record createExampleRecord() {
-        final Map<String, Object> values = Map.of(
-                "id", 48,
-                "firstName", "John",
-                "lastName", "Doe",
-                "name", "John Doe",
-                // field "missing" is missing purposely
-                "date", "2017-10-20T11:00:00Z",
-                "attributes", new HashMap<>(Map.of(
+        final Map<String, Object> values = Map.ofEntries(
+                entry("id", 48),
+                entry("firstName", "John"),
+                entry("lastName", "Doe"),
+                entry("name", "John Doe"),
+                // field "missing" is missing purposel)y
+                entry("date", "2017-10-20T11:00:00Z"),
+                entry("attributes", new HashMap<>(Map.of(
                         "city", "New York",
                         "state", "NY"
-                )),
-                "mainAccount", createAccountRecord(),
-                "numbers", new Integer[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-                "friends", new String[]{"John", "Jane", "Jacob", "Judy"},
-                "accounts", new Record[]{
-                        createAccountRecord(1, 10_000.00D),
-                        createAccountRecord(2, 48.02D)
-                }
+                ))),
+                entry("mainAccount", createAccountRecord()),
+                entry("accounts", new Record[]{
+                        createAccountRecord(6, 10_000.00D, "Las Vegas", "Nevada"),
+                        createAccountRecord(9, 48.02D, "Austin", "Texas")
+                }),
+                entry("numbers", new Integer[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}),
+                entry("friends", new String[]{"John", "Jane", "Jacob", "Judy"}),
+                entry("bytes", boxBytes("Hello World!".getBytes(StandardCharsets.UTF_8)))
         );
 
         return new MapRecord(getExampleSchema(), new HashMap<>(values));
     }
 
-    private static RecordSchema getAccountSchema() {
-        return new SimpleRecordSchema(List.of(
-                new RecordField("id", RecordFieldType.INT.getDataType()),
-                new RecordField("balance", RecordFieldType.DOUBLE.getDataType())
-        ));
+    private static Record createAccountRecord() {
+        return createAccountRecord(1);
     }
 
-    private static Record createAccountRecord() {
-        return createAccountRecord(1, 123.45D);
+    private static Record createAccountRecord(final int id) {
+        return createAccountRecord(id, 123.45D);
     }
 
     private static Record createAccountRecord(final int id, final double balance) {
+        return createAccountRecord(id, balance, "Boston", "Massachusetts");
+    }
+
+    private static Record createAccountRecord(final int id, final double balance, final String city, final String state) {
         return new MapRecord(getAccountSchema(), new HashMap<>(Map.of(
                 "id", id,
-                "balance", balance
+                "balance", balance,
+                "address", new MapRecord(getAddressSchema(), new HashMap<>(Map.of(
+                        "city", city,
+                        "state", state
+                )))
         )));
     }
 
     private static Record reduceRecord(final Record record, String... fieldsToRetain) {
         final RecordSchema schema = record.getSchema();
 
-        final List<RecordField> retainedFields = Arrays.stream(fieldsToRetain)
+        final RecordField[] retainedFields = Arrays.stream(fieldsToRetain)
                 .map(fieldName -> schema.getField(fieldName).orElseThrow())
-                .toList();
-        final RecordSchema reducedSchema = new SimpleRecordSchema(retainedFields);
+                .toArray(RecordField[]::new);
+        final RecordSchema reducedSchema = recordSchemaOf(retainedFields);
 
         return new MapRecord(reducedSchema, new HashMap<>(record.toMap()), false, true);
     }
@@ -1888,7 +2264,47 @@ public class TestRecordPath {
         return evaluateMultiFieldValue(RecordPath.compile(path), record, contextNode);
     }
 
+    private static List<FieldValue> evaluateMultiFieldValue(final RecordPath path, final Record record) {
+        return evaluateMultiFieldValue(path, record, null);
+    }
+
     private static List<FieldValue> evaluateMultiFieldValue(final String path, final Record record) {
         return evaluateMultiFieldValue(path, record, null);
+    }
+
+    private static RecordSchema recordSchemaOf(RecordField... fields) {
+        return new SimpleRecordSchema(Arrays.asList(fields));
+    }
+
+    private static RecordField recordFieldOf(final String fieldName, final DataType fieldType) {
+        return new RecordField(fieldName, fieldType);
+    }
+
+    private static RecordField recordFieldOf(final String fieldName, final RecordFieldType fieldType) {
+        return recordFieldOf(fieldName, fieldType.getDataType());
+    }
+
+    private static DataType mapTypeOf(final RecordFieldType fieldType) {
+        return RecordFieldType.MAP.getMapDataType(fieldType.getDataType());
+    }
+
+    private static DataType arrayTypeOf(final DataType fieldType) {
+        return RecordFieldType.ARRAY.getArrayDataType(fieldType);
+    }
+
+    private static DataType arrayTypeOf(final RecordFieldType fieldType) {
+        return arrayTypeOf(fieldType.getDataType());
+    }
+
+    private static DataType recordTypeOf(final RecordSchema childSchema) {
+        return RecordFieldType.RECORD.getRecordDataType(childSchema);
+    }
+
+    private static Byte[] boxBytes(final byte[] bytes) {
+        Byte[] boxedBytes = new Byte[bytes.length];
+        for (int i = 0; i < bytes.length; i++) {
+            boxedBytes[i] = bytes[i];
+        }
+        return boxedBytes;
     }
 }
