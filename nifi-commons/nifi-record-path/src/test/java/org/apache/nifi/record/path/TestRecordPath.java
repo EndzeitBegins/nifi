@@ -61,6 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -532,129 +533,156 @@ public class TestRecordPath {
         @Nested
         class Anchored {
             @Test
-            public void testAnchored() { // TODO NIFI-12852 Refactor
-                final Record account1 = createAccountRecord(1, 10.0d);
-                final Record account2 = createAccountRecord(2, 0.0d);
-                final Record account3 = createAccountRecord(3, 42.0d);
-                record.setValue("accounts", new Record[]{account1, account2, account3});
+            void allowsAnchoringRootContextOnAChildRecord() {
+                final RecordPath recordPath = assertDoesNotThrow(
+                        () -> RecordPath.compile("anchored(/mainAccount, concat(/id, '->', /balance))")
+                );
 
-                assertEquals(10.0d, evaluateSingleFieldValue("anchored(/accounts, /balance)", record).getValue());
-                assertEquals(List.of(10.0d, 0.0d, 42.0d), valuesOf(evaluateMultiFieldValue("anchored(/accounts, /balance)", record)));
-                assertEquals(List.of(), valuesOf(evaluateMultiFieldValue("anchored(/mainAccount/balance, /)", record)));
+                final FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
+                assertEquals("1->123.45", fieldValue.getValue());
+            }
+
+            @Test
+            void allowsAnchoringRootContextOnAnArray() {
+                final RecordPath recordPath = assertDoesNotThrow(
+                        () -> RecordPath.compile("anchored(/accounts, concat(/id, '->', /balance))")
+                );
+
+                final List<FieldValue> fieldValues = evaluateMultiFieldValue(recordPath, record);
+                assertAll(
+                        () -> assertEquals(2, fieldValues.size()),
+                        () -> assertEquals("6->10000.0", fieldValues.getFirst().getValue()),
+                        () -> assertEquals("9->48.02", fieldValues.get(1).getValue())
+                );
             }
         }
 
         @Nested
         class Base64Decode {
+            private final Base64.Encoder encoder = Base64.getEncoder();
+
             @Test
-            public void testBase64Decode() { // TODO NIFI-12852 Refactor
-                final Record record = reduceRecord(TestRecordPath.this.record, "firstName", "lastName", "bytes");
-                record.setValue("firstName", Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)));
-                record.setValue("lastName", Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)));
-                record.setValue("bytes", Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)));
+            void allowsToDecodeBase64EncodedByteArray() {
+                final byte[] expectedBytes = "My bytes".getBytes(StandardCharsets.UTF_8);
+                record.setValue("bytes", encoder.encode(expectedBytes));
 
-                final List<Object> expectedValues = Arrays.asList("John", "Doe", "xyz".getBytes(StandardCharsets.UTF_8));
+                final FieldValue fieldValue = evaluateSingleFieldValue("base64Decode(/bytes)", record);
+                assertArrayEquals(expectedBytes, (byte[]) fieldValue.getValue());
+            }
 
-                assertEquals("John", evaluateSingleFieldValue("base64Decode(/firstName)", record).getValue());
-                assertEquals("Doe", evaluateSingleFieldValue("base64Decode(/lastName)", record).getValue());
-                assertArrayEquals("xyz".getBytes(StandardCharsets.UTF_8), (byte[]) evaluateSingleFieldValue("base64Decode(/bytes)", record).getValue());
-                List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Decode(/*)", record));
-                IntStream.range(0, 3).forEach(i -> {
-                    Object expectedObject = expectedValues.get(i);
-                    Object actualObject = actualValues.get(i);
-                    if (actualObject instanceof String) {
-                        assertEquals(expectedObject, actualObject);
-                    } else if (actualObject instanceof byte[]) {
-                        assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
-                    }
-                });
+            @Test
+            void allowsToDecodeBase64EncodedUtf8String() {
+                final String expectedString = "My string";
+                record.setValue("name", encoder.encodeToString(expectedString.getBytes(StandardCharsets.UTF_8)));
+
+                final FieldValue fieldValue = evaluateSingleFieldValue("base64Decode(/name)", record);
+                assertEquals(expectedString, fieldValue.getValue());
             }
         }
 
         @Nested
         class Base64Encode {
+            private final Base64.Encoder encoder = Base64.getEncoder();
 
             @Test
-            public void testBase64Encode() { // TODO NIFI-12852 Refactor
-                final Record record = reduceRecord(TestRecordPath.this.record, "firstName", "lastName", "bytes");
-                record.setValue("firstName", "John");
-                record.setValue("lastName", "Doe");
-                record.setValue("bytes", "xyz".getBytes(StandardCharsets.UTF_8));
+            void allowsToBase64EncodeByteArray() {
+                final byte[] exampleBytes = "My bytes".getBytes(StandardCharsets.UTF_8);
+                record.setValue("bytes", exampleBytes);
 
-                final List<Object> expectedValues = Arrays.asList(
-                        Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
-                        Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
-                        Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8))
-                );
+                final FieldValue fieldValue = evaluateSingleFieldValue("base64Encode(/bytes)", record);
+                assertArrayEquals(encoder.encode(exampleBytes), (byte[]) fieldValue.getValue());
+            }
 
-                assertEquals(Base64.getEncoder().encodeToString("John".getBytes(StandardCharsets.UTF_8)),
-                        evaluateSingleFieldValue("base64Encode(/firstName)", record).getValue());
-                assertEquals(Base64.getEncoder().encodeToString("Doe".getBytes(StandardCharsets.UTF_8)),
-                        evaluateSingleFieldValue("base64Encode(/lastName)", record).getValue());
-                assertArrayEquals(Base64.getEncoder().encode("xyz".getBytes(StandardCharsets.UTF_8)),
-                        (byte[]) evaluateSingleFieldValue("base64Encode(/bytes)", record).getValue());
-                List<Object> actualValues = valuesOf(evaluateMultiFieldValue("base64Encode(/*)", record));
-                IntStream.range(0, 3).forEach(i -> {
-                    Object expectedObject = expectedValues.get(i);
-                    Object actualObject = actualValues.get(i);
-                    if (actualObject instanceof String) {
-                        assertEquals(expectedObject, actualObject);
-                    } else if (actualObject instanceof byte[]) {
-                        assertArrayEquals((byte[]) expectedObject, (byte[]) actualObject);
-                    }
-                });
+            @Test
+            void allowsToBase64EncodeUtf8String() {
+                final String exampleString = "My string";
+                record.setValue("name", "My string");
+
+                final FieldValue fieldValue = evaluateSingleFieldValue("base64Encode(/name)", record);
+                assertEquals(encoder.encodeToString(exampleString.getBytes(StandardCharsets.UTF_8)), fieldValue.getValue());
             }
         }
 
         @Nested
         class Coalesce {
             @Test
-            public void testCoalesce() { // TODO NIFI-12852 Refactor
-                final RecordPath recordPath = RecordPath.compile("coalesce(/id, /name)");
-                record.setValue("id", "1234");
+            void resolvesToFirstNonNullValueAmongNullValues() {
                 record.setValue("name", null);
+                record.setValue("firstName", null);
+                record.setValue("lastName", "Eve");
 
-                // Test where the first value is populated
-                FieldValue fieldValue = evaluateSingleFieldValue(recordPath, record);
-                assertEquals("1234", fieldValue.getValue());
-                assertEquals("id", fieldValue.getField().getFieldName());
+                final FieldValue fieldValue = evaluateSingleFieldValue("coalesce(/name, /firstName, /lastName)", record);
+                assertEquals("Eve", fieldValue.getValue());
+            }
+            @Test
+            void resolvesToFirstValueAmongNonNullValues() {
+                record.setValue("name", "Alice");
+                record.setValue("firstName", "Bob");
+                record.setValue("lastName", "Eve");
 
-                // Test different value populated
-                record.setValue("id", null);
-                record.setValue("name", "John Doe");
+                final FieldValue fieldValue = evaluateSingleFieldValue("coalesce(/name, /firstName, /lastName)", record);
+                assertEquals("Alice", fieldValue.getValue());
+            }
 
-                fieldValue = evaluateSingleFieldValue(recordPath, record);
-                assertEquals("John Doe", fieldValue.getValue());
-                assertEquals("name", fieldValue.getField().getFieldName());
-
-                // Test all null
-                record.setValue("id", null);
+            @Test
+            void resolvesToNullWhenAllValuesAreNull() {
                 record.setValue("name", null);
+                record.setValue("firstName", null);
+                record.setValue("lastName", null);
 
-                assertFalse(recordPath.evaluate(record).getSelectedFields().findFirst().isPresent());
+                final List<FieldValue> fieldValues =
+                        evaluateMultiFieldValue("coalesce(/name, /firstName, /lastName)", record);
+                assertEquals(List.of(), fieldValues);
+            }
 
-                // Test none is null
-                record.setValue("id", "1234");
-                record.setValue("name", "John Doe");
+            @Test
+            void supportsLiteralValues() {
+                record.setValue("name", null);
+                record.setValue("firstName", "other");
 
-                fieldValue = evaluateSingleFieldValue(recordPath, record);
-                assertEquals("1234", fieldValue.getValue());
-                assertEquals("id", fieldValue.getField().getFieldName());
+                final FieldValue fieldValue = evaluateSingleFieldValue("coalesce(/name, 'default', /firstName)", record);
+                assertEquals("default", fieldValue.getValue());
+            }
 
-                // Test missing field
-                record.setValue("name", "John Doe");
+            @Test
+            void supportsVariableNumberOfArguments() {
+                final FieldValue singleArgumentFieldValue = evaluateSingleFieldValue("coalesce('single')", record);
+                assertEquals("single", singleArgumentFieldValue.getValue());
 
-                fieldValue = evaluateSingleFieldValue("coalesce(/missing, /name)", record);
-                assertEquals("John Doe", fieldValue.getValue());
-                assertEquals("name", fieldValue.getField().getFieldName());
+                final String multiVariableRecordPath = Stream.concat(
+                        Stream.generate(() -> "/missing").limit(1_000),
+                        Stream.of("'multiple'")
+                ).collect(Collectors.joining(", ", "coalesce(", ")"));
+                final FieldValue multipleArgumentsFieldValue = evaluateSingleFieldValue(multiVariableRecordPath, record);
+                assertEquals("multiple", multipleArgumentsFieldValue.getValue());
             }
         }
 
         @Nested
         class Concat {
             @Test
-            public void testConcat() { // TODO NIFI-12852 Refactor
-                assertEquals("John Doe: 48", evaluateSingleFieldValue("concat(/firstName, ' ', /lastName, ': ', 48)", record).getValue());
+            void concatenatesArgumentsIntoAString() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("concat(/firstName, /attributes['state'])", record);
+                assertEquals("JohnNY", fieldValue.getValue());
+            }
+
+            @Test
+            void supportsNumericalValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("concat(/id, /mainAccount/balance)", record);
+                assertEquals("48123.45", fieldValue.getValue());
+            }
+
+            @Test
+            void usesStringLiteralNullForNullValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("concat(/firstName, /missing)", record);
+                assertEquals("Johnnull", fieldValue.getValue());
+            }
+
+            @Test
+            void supportsLiteralValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("concat('Hello NiFi', ' ', 2)", record);
+                assertEquals("Hello NiFi 2", fieldValue.getValue());
+
             }
         }
 
