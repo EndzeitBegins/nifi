@@ -84,6 +84,7 @@ public class TestRecordPath {
     // TODO NIFI-12852 array negative index access first element not working?
     // TODO NIFI-12852 use reference as array index
     // TODO NIFI-12852 use reference as map key
+    // TODO NIFI-12852 throw better exception when literal passed to fieldName
 
     private static final String USER_TIMEZONE_PROPERTY = "user.timezone";
     private static final String SYSTEM_TIMEZONE = System.getProperty(USER_TIMEZONE_PROPERTY);
@@ -687,26 +688,28 @@ public class TestRecordPath {
         }
 
         @Nested
-        class Count { // TODO NIFI-12852 Refactor
+        class Count {
             @Test
-            public void testCountArrayElements() {
-                final List<FieldValue> fieldValues = evaluateMultiFieldValue("count(/numbers[*])", record);
-                assertEquals(1, fieldValues.size());
-                assertEquals(10L, fieldValues.getFirst().getValue());
+            void countsTheNumberOfResultsOfARecordPath() {
+                assertEquals(2L, evaluateSingleFieldValue("count(/attributes[*])", record).getValue());
+                assertEquals(3L, evaluateSingleFieldValue("count(/friends[0, 1, 3])", record).getValue());
+                assertEquals(1L, evaluateSingleFieldValue("count(/*[fieldName(.) = 'bytes'])", record).getValue());
             }
 
             @Test
-            public void testCountComparison() {
-                final List<FieldValue> fieldValues = evaluateMultiFieldValue("count(/numbers[*]) > 9", record);
-                assertEquals(1, fieldValues.size());
-                assertEquals(true, fieldValues.getFirst().getValue());
+            void yieldsOneForReferencesToASingleFieldRegardlessOfItsValue() {
+                assertAll(Stream.of("id" ,"name", "missing", "attributes", "friends", "mainAccount")
+                        .map(fieldName -> () -> {
+                            FieldValue fieldValue = evaluateSingleFieldValue("count(/%s)".formatted(fieldName), record);
+                            assertEquals(1L, fieldValue.getValue());
+                        }
+                ));
             }
 
             @Test
-            public void testCountAsFilter() {
-                final List<FieldValue> fieldValues = evaluateMultiFieldValue("/id[count(/numbers[*]) > 2]", record);
-                assertEquals(1, fieldValues.size());
-                assertEquals(48, fieldValues.getFirst().getValue());
+            void yieldsOneForLiteralValues() {
+                assertEquals(1L, evaluateSingleFieldValue("count('hello')", record).getValue());
+                assertEquals(1L, evaluateSingleFieldValue("count(56)", record).getValue());
             }
         }
 
@@ -727,17 +730,33 @@ public class TestRecordPath {
         }
 
         @Nested
-        class FieldName { // TODO NIFI-12852 Refactor
+        class FieldName {
             @Test
-            public void testFieldName() {
-                final Record record = reduceRecord(createExampleRecord(), "name");
+            public void returnsNameOfReferencedFieldRegardlessOfItsValue() {
+                assertEquals("id", evaluateSingleFieldValue("fieldName(/id)", record).getValue());
+                assertEquals("missing", evaluateSingleFieldValue("fieldName(/missing)", record).getValue());
+            }
 
-                assertEquals("name", evaluateSingleFieldValue("fieldName(/name)", record).getValue());
-                assertEquals("name", evaluateSingleFieldValue("fieldName(/*)", record).getValue());
-                assertEquals("John Doe", evaluateSingleFieldValue("//*[startsWith(fieldName(.), 'na')]", record).getValue());
-                assertEquals("name", evaluateSingleFieldValue("fieldName(//*[startsWith(fieldName(.), 'na')])", record).getValue());
-                assertEquals("John Doe", evaluateSingleFieldValue("//name[not(startsWith(fieldName(.), 'xyz'))]", record).getValue());
-                assertEquals(0L, evaluateMultiFieldValue("//name[not(startsWith(fieldName(.), 'n'))]", record).size());
+            @Test
+            public void supportsRecordPathsWithNoResults() {
+                final List<FieldValue> fieldValues = evaluateMultiFieldValue("fieldName(/name[/id != /id])", record);
+                assertEquals(List.of(), fieldValues);
+            }
+
+            @Test
+            public void supportsRecordPathsWithMultipleResults() {
+                final List<FieldValue> fieldValues = evaluateMultiFieldValue("fieldName(/mainAccount/*)", record);
+                assertEquals(List.of("id", "balance", "address"), fieldValues.stream().map(FieldValue::getValue).toList());
+            }
+
+            @Test
+            void returnsNameOfFunctionWhenPassedAFunction() {
+                assertEquals("concat", evaluateSingleFieldValue("fieldName(concat('enate'))", record).getValue());
+            }
+
+            @Test
+            void throwsExceptionWhenPassedLiteralValue() {
+                assertThrows(Exception.class, () -> evaluateSingleFieldValue("fieldName('whoops')", record));
             }
         }
 
@@ -815,16 +834,57 @@ public class TestRecordPath {
         }
 
         @Nested
-        class Hash { // TODO NIFI-12852 Refactor
+        class Hash {
             @Test
-            public void testHash() {
-                assertEquals("61409aa1fd47d4a5332de23cbf59a36f", evaluateSingleFieldValue("hash(/firstName, 'MD5')", record).getValue());
-                assertEquals("5753a498f025464d72e088a9d5d6e872592d5f91", evaluateSingleFieldValue("hash(/firstName, 'SHA-1')", record).getValue());
+            void canCalculateSha512HashValues() {
+                assertEquals("1fcb45d41a91df3139cb682a7895cf39636bab30d7f464943ca4f2287f72c06f4c34b10d203b26ccca06e9051c024252657302dd8ad3b2086c6bfd9bd34fa407", evaluateSingleFieldValue("hash(/name, 'SHA-512')", record).getValue());
             }
 
             @Test
-            public void testHashFailure() {
-                assertThrows(RecordPathException.class, () -> evaluateSingleFieldValue("hash(/firstName, 'NOT_A_ALGO')", record).getValue());
+            void canCalculateMd5HashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'MD5')", record);
+                assertEquals("4c2a904bafba06591225113ad17b5cec", fieldValue.getValue());
+            }
+
+            @Test
+            void canCalculateSha384HashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-384')", record);
+                assertEquals("d0e24ff9f82e2a6b35409aec172e64b363f2dd26d8881d19f63214d5552357a40e32ac874a587d3fcf43ec86299eb001", fieldValue.getValue());
+            }
+
+            @Test
+            void canCalculateSha224HashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-224')", record);
+                assertEquals("20b058bc065abdbbd674123ed539286fa2765589424c38cd9e27b748", fieldValue.getValue());
+            }
+
+            @Test
+            void canCalculateSha256HashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-256')", record);
+                assertEquals("6cea57c2fb6cbc2a40411135005760f241fffc3e5e67ab99882726431037f908", fieldValue.getValue());
+            }
+
+            @Test
+            void canCalculateMd2HashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'MD2')", record);
+                assertEquals("bb4d5a2fb65820445e54f00d629e1127", fieldValue.getValue());
+            }
+
+            @Test
+            void canCalculateShaHashValues() {
+                final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA')", record);
+                assertEquals("ae6e4d1209f17b460503904fad297b31e9cf6362", fieldValue.getValue());
+            }
+
+            @Test
+            public void throwsRecordPathExceptionOnUnsupportedAlgorithm() {
+                assertThrows(RecordPathException.class, () -> evaluateSingleFieldValue("hash(/name, 'NOT_A_ALGO')", record));
+            }
+
+            @Test
+            void supportsProvidingAlgorithmAsReference() {
+                record.setValue("name", "MD5");
+                assertEquals("7f138a09169b250e9dcb378140907378", evaluateSingleFieldValue("hash(/name, /name)", record).getValue());
             }
         }
 
@@ -1483,7 +1543,7 @@ public class TestRecordPath {
             assertEquals("mainAccount", fieldValue.getField().getFieldName());
         }
 
-        // TODO NIFI-12852 Operators on time?
+        // TODO NIFI-12852 Operators (greater, smaller ..) on time?
 
         @Nested
         class Contains {
