@@ -85,6 +85,7 @@ public class TestRecordPath {
     // TODO NIFI-12852 use reference as array index
     // TODO NIFI-12852 use reference as map key
     // TODO NIFI-12852 throw better exception when literal passed to fieldName
+    // TODO NIFI-12852 mapOf declares record type as "MAP<String>" but returns a Record (MapRecord)
 
     private static final String USER_TIMEZONE_PROPERTY = "user.timezone";
     private static final String SYSTEM_TIMEZONE = System.getProperty(USER_TIMEZONE_PROPERTY);
@@ -534,7 +535,7 @@ public class TestRecordPath {
         @Nested
         class Anchored {
             @Test
-            void allowsAnchoringRootContextOnAChildRecord() {
+            public void allowsAnchoringRootContextOnAChildRecord() {
                 final RecordPath recordPath = assertDoesNotThrow(
                         () -> RecordPath.compile("anchored(/mainAccount, concat(/id, '->', /balance))")
                 );
@@ -544,7 +545,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void allowsAnchoringRootContextOnAnArray() {
+            public void allowsAnchoringRootContextOnAnArray() {
                 final RecordPath recordPath = assertDoesNotThrow(
                         () -> RecordPath.compile("anchored(/accounts, concat(/id, '->', /balance))")
                 );
@@ -563,7 +564,7 @@ public class TestRecordPath {
             private final Base64.Encoder encoder = Base64.getEncoder();
 
             @Test
-            void allowsToDecodeBase64EncodedByteArray() {
+            public void allowsToDecodeBase64EncodedByteArray() {
                 final byte[] expectedBytes = "My bytes".getBytes(StandardCharsets.UTF_8);
                 record.setValue("bytes", encoder.encode(expectedBytes));
 
@@ -572,7 +573,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void allowsToDecodeBase64EncodedUtf8String() {
+            public void allowsToDecodeBase64EncodedUtf8String() {
                 final String expectedString = "My string";
                 record.setValue("name", encoder.encodeToString(expectedString.getBytes(StandardCharsets.UTF_8)));
 
@@ -586,7 +587,7 @@ public class TestRecordPath {
             private final Base64.Encoder encoder = Base64.getEncoder();
 
             @Test
-            void allowsToBase64EncodeByteArray() {
+            public void allowsToBase64EncodeByteArray() {
                 final byte[] exampleBytes = "My bytes".getBytes(StandardCharsets.UTF_8);
                 record.setValue("bytes", exampleBytes);
 
@@ -595,7 +596,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void allowsToBase64EncodeUtf8String() {
+            public void allowsToBase64EncodeUtf8String() {
                 final String exampleString = "My string";
                 record.setValue("name", "My string");
 
@@ -607,7 +608,7 @@ public class TestRecordPath {
         @Nested
         class Coalesce {
             @Test
-            void resolvesToFirstNonNullValueAmongNullValues() {
+            public void resolvesToFirstNonNullValueAmongNullValues() {
                 record.setValue("name", null);
                 record.setValue("firstName", null);
                 record.setValue("lastName", "Eve");
@@ -616,7 +617,7 @@ public class TestRecordPath {
                 assertEquals("Eve", fieldValue.getValue());
             }
             @Test
-            void resolvesToFirstValueAmongNonNullValues() {
+            public void resolvesToFirstValueAmongNonNullValues() {
                 record.setValue("name", "Alice");
                 record.setValue("firstName", "Bob");
                 record.setValue("lastName", "Eve");
@@ -626,7 +627,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void resolvesToNullWhenAllValuesAreNull() {
+            public void resolvesToNullWhenAllValuesAreNull() {
                 record.setValue("name", null);
                 record.setValue("firstName", null);
                 record.setValue("lastName", null);
@@ -637,7 +638,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void supportsLiteralValues() {
+            public void supportsLiteralValues() {
                 record.setValue("name", null);
                 record.setValue("firstName", "other");
 
@@ -646,7 +647,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void supportsVariableNumberOfArguments() {
+            public void supportsVariableNumberOfArguments() {
                 final FieldValue singleArgumentFieldValue = evaluateSingleFieldValue("coalesce('single')", record);
                 assertEquals("single", singleArgumentFieldValue.getValue());
 
@@ -662,25 +663,25 @@ public class TestRecordPath {
         @Nested
         class Concat {
             @Test
-            void concatenatesArgumentsIntoAString() {
+            public void concatenatesArgumentsIntoAString() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("concat(/firstName, /attributes['state'])", record);
                 assertEquals("JohnNY", fieldValue.getValue());
             }
 
             @Test
-            void supportsNumericalValues() {
+            public void supportsNumericalValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("concat(/id, /mainAccount/balance)", record);
                 assertEquals("48123.45", fieldValue.getValue());
             }
 
             @Test
-            void usesStringLiteralNullForNullValues() {
+            public void usesStringLiteralNullForNullValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("concat(/firstName, /missing)", record);
                 assertEquals("Johnnull", fieldValue.getValue());
             }
 
             @Test
-            void supportsLiteralValues() {
+            public void supportsLiteralValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("concat('Hello NiFi', ' ', 2)", record);
                 assertEquals("Hello NiFi 2", fieldValue.getValue());
 
@@ -690,14 +691,14 @@ public class TestRecordPath {
         @Nested
         class Count {
             @Test
-            void countsTheNumberOfResultsOfARecordPath() {
+            public void countsTheNumberOfResultsOfARecordPath() {
                 assertEquals(2L, evaluateSingleFieldValue("count(/attributes[*])", record).getValue());
                 assertEquals(3L, evaluateSingleFieldValue("count(/friends[0, 1, 3])", record).getValue());
                 assertEquals(1L, evaluateSingleFieldValue("count(/*[fieldName(.) = 'bytes'])", record).getValue());
             }
 
             @Test
-            void yieldsOneForReferencesToASingleFieldRegardlessOfItsValue() {
+            public void yieldsOneForReferencesToASingleFieldRegardlessOfItsValue() {
                 assertAll(Stream.of("id" ,"name", "missing", "attributes", "friends", "mainAccount")
                         .map(fieldName -> () -> {
                             FieldValue fieldValue = evaluateSingleFieldValue("count(/%s)".formatted(fieldName), record);
@@ -707,7 +708,7 @@ public class TestRecordPath {
             }
 
             @Test
-            void yieldsOneForLiteralValues() {
+            public void yieldsOneForLiteralValues() {
                 assertEquals(1L, evaluateSingleFieldValue("count('hello')", record).getValue());
                 assertEquals(1L, evaluateSingleFieldValue("count(56)", record).getValue());
             }
@@ -716,14 +717,38 @@ public class TestRecordPath {
         @Nested
         class EscapeJson {
             @Test
-            public void testEscapeJson() { // TODO NIFI-12852 Refactor
-                final Record record = reduceRecord(TestRecordPath.this.record, "id", "firstName", "attributes", "mainAccount", "numbers");
+            public void escapesReferencedStringValueAsStringLiteral() {
+                assertEquals("\"John Doe\"", evaluateSingleFieldValue("escapeJson(/name)", record).getValue());
+            }
 
-                assertEquals("\"John\"", evaluateSingleFieldValue("escapeJson(/firstName)", record).getValue());
+            @Test
+            public void escapesReferencedNumericValueAsNumberLiteral() {
                 assertEquals("48", evaluateSingleFieldValue("escapeJson(/id)", record).getValue());
+                assertEquals("123.45", evaluateSingleFieldValue("escapeJson(/mainAccount/balance)", record).getValue());
+            }
+
+            @Test
+            public void escapesReferencedArrayValueAsArray() {
                 assertEquals("[0,1,2,3,4,5,6,7,8,9]", evaluateSingleFieldValue("escapeJson(/numbers)", record).getValue());
+                assertEquals("[\"John\",\"Jane\",\"Jacob\",\"Judy\"]", evaluateSingleFieldValue("escapeJson(/friends)", record).getValue());
+            }
+
+            @Test
+            public void escapesReferencedMapValueAsObject() {
+                assertEquals("{\"city\":\"New York\",\"state\":\"NY\"}", evaluateSingleFieldValue("escapeJson(/attributes)", record).getValue());
+            }
+
+            @Test
+            public void escapesReferencedRecordValueAsObject() {
+                assertEquals("{\"id\":1,\"balance\":123.45,\"address\":{\"city\":\"Boston\",\"state\":\"Massachusetts\"}}", evaluateSingleFieldValue("escapeJson(/mainAccount)", record).getValue());
+            }
+
+            @Test
+            public void supportsEscapingWholeRecord() {
+                final Record record = reduceRecord(TestRecordPath.this.record, "id", "attributes", "mainAccount", "numbers");
+
                 assertEquals(
-                        "{\"id\":48,\"firstName\":\"John\",\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45,\"address\":{\"city\":\"Boston\",\"state\":\"Massachusetts\"}},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}",
+                        "{\"id\":48,\"attributes\":{\"city\":\"New York\",\"state\":\"NY\"},\"mainAccount\":{\"id\":1,\"balance\":123.45,\"address\":{\"city\":\"Boston\",\"state\":\"Massachusetts\"}},\"numbers\":[0,1,2,3,4,5,6,7,8,9]}",
                         evaluateSingleFieldValue("escapeJson(/)", record).getValue()
                 );
             }
@@ -750,12 +775,12 @@ public class TestRecordPath {
             }
 
             @Test
-            void returnsNameOfFunctionWhenPassedAFunction() {
+            public void returnsNameOfFunctionWhenPassedAFunction() {
                 assertEquals("concat", evaluateSingleFieldValue("fieldName(concat('enate'))", record).getValue());
             }
 
             @Test
-            void throwsExceptionWhenPassedLiteralValue() {
+            public void throwsExceptionWhenPassedLiteralValue() {
                 assertThrows(Exception.class, () -> evaluateSingleFieldValue("fieldName('whoops')", record));
             }
         }
@@ -836,42 +861,42 @@ public class TestRecordPath {
         @Nested
         class Hash {
             @Test
-            void canCalculateSha512HashValues() {
+            public void canCalculateSha512HashValues() {
                 assertEquals("1fcb45d41a91df3139cb682a7895cf39636bab30d7f464943ca4f2287f72c06f4c34b10d203b26ccca06e9051c024252657302dd8ad3b2086c6bfd9bd34fa407", evaluateSingleFieldValue("hash(/name, 'SHA-512')", record).getValue());
             }
 
             @Test
-            void canCalculateMd5HashValues() {
+            public void canCalculateMd5HashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'MD5')", record);
                 assertEquals("4c2a904bafba06591225113ad17b5cec", fieldValue.getValue());
             }
 
             @Test
-            void canCalculateSha384HashValues() {
+            public void canCalculateSha384HashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-384')", record);
                 assertEquals("d0e24ff9f82e2a6b35409aec172e64b363f2dd26d8881d19f63214d5552357a40e32ac874a587d3fcf43ec86299eb001", fieldValue.getValue());
             }
 
             @Test
-            void canCalculateSha224HashValues() {
+            public void canCalculateSha224HashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-224')", record);
                 assertEquals("20b058bc065abdbbd674123ed539286fa2765589424c38cd9e27b748", fieldValue.getValue());
             }
 
             @Test
-            void canCalculateSha256HashValues() {
+            public void canCalculateSha256HashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA-256')", record);
                 assertEquals("6cea57c2fb6cbc2a40411135005760f241fffc3e5e67ab99882726431037f908", fieldValue.getValue());
             }
 
             @Test
-            void canCalculateMd2HashValues() {
+            public void canCalculateMd2HashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'MD2')", record);
                 assertEquals("bb4d5a2fb65820445e54f00d629e1127", fieldValue.getValue());
             }
 
             @Test
-            void canCalculateShaHashValues() {
+            public void canCalculateShaHashValues() {
                 final FieldValue fieldValue = evaluateSingleFieldValue("hash(/name, 'SHA')", record);
                 assertEquals("ae6e4d1209f17b460503904fad297b31e9cf6362", fieldValue.getValue());
             }
@@ -882,38 +907,48 @@ public class TestRecordPath {
             }
 
             @Test
-            void supportsProvidingAlgorithmAsReference() {
+            public void supportsProvidingAlgorithmAsReference() {
                 record.setValue("name", "MD5");
                 assertEquals("7f138a09169b250e9dcb378140907378", evaluateSingleFieldValue("hash(/name, /name)", record).getValue());
             }
         }
 
         @Nested
-        class Join { // TODO NIFI-12852 Refactor
+        class Join {
             @Test
-            public void testJoinWithTwoFields() {
-                assertEquals("Doe, John", evaluateSingleFieldValue("join(', ', /lastName, /firstName)", record).getValue());
+            void yieldsStringConsistingOfPassedArgumentsJoinedByDeclaredSeparator() {
+                assertEquals("John, Doe, John Doe", evaluateSingleFieldValue("join(', ', /firstName, /lastName, /name)", record).getValue());
             }
 
             @Test
-            public void testJoinWithArray() {
-                assertEquals("John,Jane,Jacob,Judy", evaluateSingleFieldValue("join(',', /friends)", record).getValue());
+            void yieldsArgumentsAsIsWhenGivenSingleArgumentBesidesSeparator() {
+                assertEquals("John Doe", evaluateSingleFieldValue("join('---', /name)", record).getValue());
             }
 
             @Test
-            public void testJoinWithArrayAndMultipleFields() {
-                assertEquals("Doe\nJohn\nJane\nJacob", evaluateSingleFieldValue("join('\\n', /lastName, /firstName, /friends[1..2])", record).getValue());
+            void supportsLiteralValuesAsArguments() {
+                assertEquals("Nyan Cat", evaluateSingleFieldValue("join(' ', 'Nyan', 'Cat')", record).getValue());
+            }
+
+            @Test
+            void usesItemsAsArgumentsWhenGivenAnArray() {
+                assertEquals("John Jane Jacob Doe", evaluateSingleFieldValue("join(' ', /firstName, /friends[1..2], /lastName)", record).getValue());
             }
         }
 
         @Nested
         class MapOf {
             @Test
-            public void testMapOf() { // TODO NIFI-12852 Refactor
-                final FieldValue fv = evaluateSingleFieldValue("mapOf('firstName', /firstName, 'lastName', /lastName)", record);
-                assertEquals(fv.getField().getDataType().getFieldType(), mapTypeOf(RecordFieldType.STRING).getFieldType());
-                assertEquals("MapRecord[{firstName=John, lastName=Doe}]", fv.getValue().toString());
+            void generatesMapOfStringFromProvidedArguments() {
+                final FieldValue fieldValue = evaluateSingleFieldValue(
+                        "mapOf('id', /id, 'fullName', /name, 'money', /mainAccount/balance, 'nullStringLiteral', /missing)", record
+                );
 
+                assertEquals("MapRecord[{nullStringLiteral=null, money=123.45, fullName=John Doe, id=48}]", fieldValue.getValue()); // TODO NIFI-13643
+            }
+
+            @Test
+            void throwsARecordPathExceptionWhenPassedAnOddAmountOfArguments() {
                 assertThrows(RecordPathException.class, () -> RecordPath.compile("mapOf('firstName', /firstName, 'lastName')").evaluate(record));
             }
         }
