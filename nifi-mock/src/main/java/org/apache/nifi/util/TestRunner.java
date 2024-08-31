@@ -164,7 +164,7 @@ public interface TestRunner {
      * Waits for all threads to finish execution.
      * </li>
      * <li>
-     * If and only if the value of <code>shutdown</code> is true: Call all
+     * If and only if the value of <code>stopOnFinish</code> is true: Call all
      * methods on the Processor that is annotated with the
      * {@link org.apache.nifi.annotation.lifecycle.OnStopped @OnStopped} annotation.
      * </li>
@@ -897,6 +897,17 @@ public interface TestRunner {
      * @param allow whethr or not to allow asynchronous session commits (i.e., calls to ProcessSession.commit())
      */
     void setAllowSynchronousSessionCommits(boolean allow);
+
+    /**
+     * Specifies whether the TestRunner will allow {@link #stop()} to be called with pending changes in any session.
+     * <p>
+     * By default, the value is <code>false</code>, meaning that any direct or indirect call to {@link #stop()}
+     * while any of the created sessions contain pending uncommited changes will throw an Exception.
+     * TODO NIFI-13698 Why is this useful?
+     *
+     * @param allow Allow uncommited pending changes on {@link #stop()} of the component
+     */
+    void setAllowPendingChangesInSession(boolean allow);
 
     /**
      * Removes the {@link PropertyDescriptor} from the {@link ProcessContext},

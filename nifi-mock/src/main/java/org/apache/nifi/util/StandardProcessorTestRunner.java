@@ -92,6 +92,7 @@ public class StandardProcessorTestRunner implements TestRunner {
     private int numThreads = 1;
     private MockSessionFactory sessionFactory;
     private boolean allowSynchronousSessionCommits = false;
+    private boolean allowPendingChangesInSession = false;
     private long runSchedule = 0;
     private final AtomicInteger invocations = new AtomicInteger(0);
 
@@ -159,6 +160,11 @@ public class StandardProcessorTestRunner implements TestRunner {
     public void setAllowSynchronousSessionCommits(final boolean allowSynchronousSessionCommits) {
         this.allowSynchronousSessionCommits = allowSynchronousSessionCommits;
         this.sessionFactory = new MockSessionFactory(sharedState, processor, enforceReadStreamsClosed, processorStateManager, allowSynchronousSessionCommits);
+    }
+
+    @Override
+    public void setAllowPendingChangesInSession(final boolean allow) {
+        this.allowPendingChangesInSession = allow;
     }
 
     @Override
@@ -270,6 +276,16 @@ public class StandardProcessorTestRunner implements TestRunner {
             ReflectionUtils.invokeMethodsWithAnnotation(OnStopped.class, processor, context);
         } catch (final Exception e) {
             Assertions.fail("Could not invoke methods annotated with @OnStopped annotation due to: " + e);
+        }
+
+        if (!allowPendingChangesInSession) {
+            assertSessionsContainNoPendingChanges();
+        }
+    }
+
+    private void assertSessionsContainNoPendingChanges() {
+        for (final MockProcessSession session : sessionFactory.getCreatedSessions()) {
+            session.assertNoPendingChanges();
         }
     }
 
