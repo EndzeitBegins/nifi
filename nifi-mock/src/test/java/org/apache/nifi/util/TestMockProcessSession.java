@@ -29,7 +29,6 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.FlowFileHandlingException;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.state.MockStateManager;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -435,7 +434,6 @@ public class TestMockProcessSession {
             resultFlowFile.assertContentEquals(expectedContent);
         }
 
-        @Disabled("The current implementation of MockProcessSession does not express this behavior defined in the interface")
         @Test
         void stateChangesAreResetOnRollback() throws IOException {
             sessionOfStatefulProcessor.setState(Map.of("attribute", "local"), Scope.LOCAL);
@@ -511,9 +509,11 @@ public class TestMockProcessSession {
 
         @Test
         void canClearLocalStateWhenDeclaredStateful() throws IOException {
-            stateManagerOfStatefulProcessor.setState(Map.of("existing", "value"), Scope.LOCAL);
+            final Map<String, String> initialState = Map.of("existing", "value");
+            stateManagerOfStatefulProcessor.setState(initialState, Scope.LOCAL);
 
             sessionOfStatefulProcessor.clearState(Scope.LOCAL);
+            stateManagerOfStatefulProcessor.assertStateEquals(initialState, Scope.LOCAL);
 
             sessionOfStatefulProcessor.commitAsync();
             stateManagerOfStatefulProcessor.assertStateSet(Scope.LOCAL);
@@ -522,9 +522,11 @@ public class TestMockProcessSession {
 
         @Test
         void canClearClusterStateWhenDeclaredStateful() throws IOException {
-            stateManagerOfStatefulProcessor.setState(Map.of("existing", "value"), Scope.LOCAL);
+            final Map<String, String> initialState = Map.of("existing", "value");
+            stateManagerOfStatefulProcessor.setState(initialState, Scope.CLUSTER);
 
             sessionOfStatefulProcessor.clearState(Scope.CLUSTER);
+            stateManagerOfStatefulProcessor.assertStateEquals(initialState, Scope.CLUSTER);
 
             sessionOfStatefulProcessor.commitAsync();
             stateManagerOfStatefulProcessor.assertStateSet(Scope.CLUSTER);
@@ -536,7 +538,7 @@ public class TestMockProcessSession {
             assertThrows(AssertionError.class, () -> {
                 session.getState(Scope.LOCAL);
             }, "Was able to get local state without declaring the being stateful");
-            stateManager.assertStateNotSet();
+            stateManager.assertStateNotSet(Scope.LOCAL);
         }
 
         @Test
@@ -544,7 +546,7 @@ public class TestMockProcessSession {
             assertThrows(AssertionError.class, () -> {
                 session.getState(Scope.CLUSTER);
             }, "Was able to get cluster state without declaring the being stateful");
-            stateManager.assertStateNotSet();
+            stateManager.assertStateNotSet(Scope.CLUSTER);
         }
 
         @Test
@@ -587,18 +589,24 @@ public class TestMockProcessSession {
         void canSetLocalStateWhenDeclaredStateful() throws IOException {
             Map<String, String> expectedState = Map.of("key", "value");
             sessionOfStatefulProcessor.setState(expectedState, Scope.LOCAL);
+            assertEquals(Map.of(), stateManagerOfStatefulProcessor.getState(Scope.LOCAL).toMap());
+            stateManagerOfStatefulProcessor.assertStateNotSet(Scope.LOCAL);
 
             sessionOfStatefulProcessor.commitAsync();
-            assertEquals(expectedState, sessionOfStatefulProcessor.getState(Scope.LOCAL).toMap());
+            assertEquals(expectedState, stateManagerOfStatefulProcessor.getState(Scope.LOCAL).toMap());
+            stateManagerOfStatefulProcessor.assertStateSet(Scope.LOCAL);
         }
 
         @Test
         void canSetClusterStateWhenDeclaredStateful() throws IOException {
             Map<String, String> expectedState = Map.of("key", "value");
             sessionOfStatefulProcessor.setState(expectedState, Scope.CLUSTER);
+            assertEquals(Map.of(), stateManagerOfStatefulProcessor.getState(Scope.CLUSTER).toMap());
+            stateManagerOfStatefulProcessor.assertStateNotSet(Scope.CLUSTER);
 
             sessionOfStatefulProcessor.commitAsync();
-            assertEquals(expectedState, sessionOfStatefulProcessor.getState(Scope.CLUSTER).toMap());
+            assertEquals(expectedState, stateManagerOfStatefulProcessor.getState(Scope.CLUSTER).toMap());
+            stateManagerOfStatefulProcessor.assertStateSet(Scope.CLUSTER);
         }
     }
 

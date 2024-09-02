@@ -16,6 +16,27 @@
  */
 package org.apache.nifi.util;
 
+import org.apache.nifi.components.state.Scope;
+import org.apache.nifi.components.state.StateManager;
+import org.apache.nifi.components.state.StateMap;
+import org.apache.nifi.controller.queue.QueueSize;
+import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.flowfile.attributes.CoreAttributes;
+import org.apache.nifi.processor.FlowFileFilter;
+import org.apache.nifi.processor.ProcessSession;
+import org.apache.nifi.processor.Processor;
+import org.apache.nifi.processor.Relationship;
+import org.apache.nifi.processor.exception.FlowFileAccessException;
+import org.apache.nifi.processor.exception.FlowFileHandlingException;
+import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.io.InputStreamCallback;
+import org.apache.nifi.processor.io.OutputStreamCallback;
+import org.apache.nifi.processor.io.StreamCallback;
+import org.apache.nifi.provenance.ProvenanceReporter;
+import org.apache.nifi.state.MockStateManager;
+import org.apache.nifi.state.MockStateMap;
+import org.junit.jupiter.api.Assertions;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -43,25 +64,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import org.apache.nifi.components.state.Scope;
-import org.apache.nifi.components.state.StateManager;
-import org.apache.nifi.components.state.StateMap;
-import org.apache.nifi.controller.queue.QueueSize;
-import org.apache.nifi.flowfile.FlowFile;
-import org.apache.nifi.flowfile.attributes.CoreAttributes;
-import org.apache.nifi.processor.FlowFileFilter;
-import org.apache.nifi.processor.ProcessSession;
-import org.apache.nifi.processor.Processor;
-import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.processor.exception.FlowFileAccessException;
-import org.apache.nifi.processor.exception.FlowFileHandlingException;
-import org.apache.nifi.processor.exception.ProcessException;
-import org.apache.nifi.processor.io.InputStreamCallback;
-import org.apache.nifi.processor.io.OutputStreamCallback;
-import org.apache.nifi.processor.io.StreamCallback;
-import org.apache.nifi.provenance.ProvenanceReporter;
-import org.apache.nifi.state.MockStateManager;
-import org.junit.jupiter.api.Assertions;
 
 public class MockProcessSession implements ProcessSession {
 
@@ -85,7 +87,10 @@ public class MockProcessSession implements ProcessSession {
     private final Map<FlowFile, InputStream> openInputStreams = new HashMap<>();
     // A List of OutputStreams that have been created by calls to {@link #write(FlowFile)} and have not yet been closed.
     private final Map<FlowFile, OutputStream> openOutputStreams = new HashMap<>();
+
     private final StateManager stateManager;
+    private final Map<Scope, StateMap> cachedStateChanges = new HashMap<>();
+
     private final boolean allowSynchronousCommits;
 
     private boolean committed = false;
@@ -290,6 +295,7 @@ public class MockProcessSession implements ProcessSession {
         closeStreams(openOutputStreams, enforceStreamsClosed);
 
         committed = true;
+        commitStateChanges();
         beingProcessed.clear();
         currentVersions.clear();
         originalVersions.clear();
@@ -320,6 +326,20 @@ public class MockProcessSession implements ProcessSession {
         }
 
         onSuccess.run();
+    }
+
+    private void commitStateChanges() {
+        try {
+            for (Scope scope : Scope.values()) {
+                final StateMap changedState = cachedStateChanges.get(scope);
+                if (changedState != null) {
+                    stateManager.setState(changedState.toMap(), scope);
+                    cachedStateChanges.remove(scope);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to commit state changes to StateManager", e);
+        }
     }
 
     /**
@@ -798,6 +818,9 @@ public class MockProcessSession implements ProcessSession {
 
         closeStreams(openInputStreams, false);
         closeStreams(openOutputStreams, false);
+
+        cachedStateChanges.remove(Scope.LOCAL);
+        cachedStateChanges.remove(Scope.CLUSTER);
 
         for (final List<MockFlowFile> list : transferMap.values()) {
             for (final MockFlowFile flowFile : list) {
@@ -1388,22 +1411,47 @@ public class MockProcessSession implements ProcessSession {
 
     @Override
     public void setState(final Map<String, String> state, final Scope scope) throws IOException {
-        stateManager.setState(state, scope);
+        cacheStateChange(state, scope);
     }
 
     @Override
     public StateMap getState(final Scope scope) throws IOException {
+        final StateMap cachedStateChange = cachedStateChanges.get(scope);
+        if (cachedStateChange != null) {
+            return cachedStateChange;
+        }
         return stateManager.getState(scope);
     }
 
     @Override
     public boolean replaceState(final StateMap oldValue, final Map<String, String> newValue, final Scope scope) throws IOException {
-        return stateManager.replace(oldValue, newValue, scope);
+        final StateMap current = getState(scope);
+
+        final String currentStateVersion = current.getStateVersion().orElse(null);
+        final String oldStateVersion = oldValue == null ? null : oldValue.getStateVersion().orElse(null);
+
+        final Map<String, String> currentStateValue = current.toMap();
+        final Map<String, String> oldStateValue = oldValue == null ? Map.of() : oldValue.toMap();
+
+        if (Objects.equals(currentStateVersion, oldStateVersion) && Objects.equals(currentStateValue, oldStateValue)) {
+            cacheStateChange(newValue, scope);
+            return true;
+        }
+
+        return false;
     }
 
     @Override
     public void clearState(final Scope scope) throws IOException {
-        stateManager.clear(scope);
+        cacheStateChange(Map.of(), scope);
+    }
+
+    private void cacheStateChange(Map<String, String> state, Scope scope) throws IOException {
+        final long version = getState(scope).getStateVersion().map(currentVersion -> Long.parseLong(currentVersion) + 1)
+                .orElse(1L);
+        final StateMap stateMap = new MockStateMap(state, version);
+
+        cachedStateChanges.put(scope, stateMap);
     }
 
     @Override
