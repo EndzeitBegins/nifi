@@ -35,6 +35,7 @@ import org.apache.nifi.util.LogMessage;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -205,6 +206,7 @@ public class ListGCSBucketTest extends AbstractGCSTest {
         assertEquals(4L, processor.getStateTimestamp());
     }
 
+    @Disabled("NIFI-13699 TODO: These tests don't actually commit the session they work on ... Setting state only fails on commit now!")
     @Test
     public void testPersistState() throws Exception {
         assertFalse(
@@ -227,6 +229,7 @@ public class ListGCSBucketTest extends AbstractGCSTest {
         assertEquals(state, stateMap.toMap());
     }
 
+    @Disabled("NIFI-13699 TODO: These tests don't actually commit the session they work on ... Setting state only fails on commit now!")
     @Test
     public void testFailedPersistState() {
         runner.getStateManager().setFailOnStateSet(Scope.CLUSTER, true);

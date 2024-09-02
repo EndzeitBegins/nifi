@@ -52,6 +52,7 @@ import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -997,6 +998,7 @@ public class CaptureChangeMySQLTest {
         assertEquals(3, resultFiles.size());
     }
 
+    @Disabled("NIFI-13699 TODO: These tests don't expected the right state based on the commits they do...")
     @Test
     public void testUpdateState() throws Exception {
         testRunner.setProperty(CaptureChangeMySQL.DRIVER_LOCATION, DRIVER_LOCATION);

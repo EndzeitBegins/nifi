@@ -132,9 +132,6 @@ public class UpdateAttribute extends AbstractProcessor implements Searchable {
     private final AtomicReference<Criteria> criteriaCache = new AtomicReference<>(null);
     private final ConcurrentMap<String, PropertyValue> propertyValues = new ConcurrentHashMap<>();
 
-    private final static Set<Relationship> statelessRelationshipSet;
-    private final static Set<Relationship> statefulRelationshipSet;
-
     /**
      * This field caches a 'canonical' value for a given attribute value. When this processor is used to update an attribute or add a new
      * attribute, if Expression Language is used, we may well end up with a new String object for each attribute for each FlowFile. As a result,
@@ -154,18 +151,8 @@ public class UpdateAttribute extends AbstractProcessor implements Searchable {
     public static final Relationship REL_FAILED_SET_STATE = new Relationship.Builder()
             .description("A failure to set the state after adding the attributes to the FlowFile will route the FlowFile here.").name("set state fail").build();
 
-    static {
-        Set<Relationship> tempStatelessSet = new HashSet<>();
-        tempStatelessSet.add(REL_SUCCESS);
-
-        statelessRelationshipSet = Collections.unmodifiableSet(tempStatelessSet);
-
-        Set<Relationship> tempStatefulSet = new HashSet<>();
-        tempStatefulSet.add(REL_SUCCESS);
-        tempStatefulSet.add(REL_FAILED_SET_STATE);
-
-        statefulRelationshipSet = Collections.unmodifiableSet(tempStatefulSet);
-    }
+    private final static Set<Relationship> statelessRelationshipSet = Set.of(REL_SUCCESS);
+    private final static Set<Relationship> statefulRelationshipSet = Set.of(REL_SUCCESS, REL_FAILED_SET_STATE);
 
     private volatile Set<Relationship> relationships;
 
