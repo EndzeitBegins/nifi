@@ -17,7 +17,6 @@
 package org.apache.nifi.update.attributes;
 
 import org.apache.nifi.components.state.Scope;
-import org.apache.nifi.processor.ProcessSessionFactory;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processors.attributes.UpdateAttribute;
 import org.apache.nifi.state.MockStateManager;
@@ -36,6 +35,7 @@ import java.util.UUID;
 
 import static org.apache.nifi.processors.attributes.UpdateAttribute.STORE_STATE_LOCALLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestUpdateAttribute {
@@ -45,7 +45,6 @@ public class TestUpdateAttribute {
     final UpdateAttribute processor = new UpdateAttribute();
     final TestRunner runner = TestRunners.newTestRunner(processor);
     final MockStateManager mockStateManager = runner.getStateManager();
-    final ProcessSessionFactory processSessionFactory = runner.getProcessSessionFactory();
 
     @Test
     public void testDefault() {
@@ -131,25 +130,27 @@ public class TestUpdateAttribute {
         runner.setProperty("sum", "${getStateValue('sum'):plus(${pencils})}");
         runner.setProperty(UpdateAttribute.STATEFUL_VARIABLES_INIT_VALUE, "0");
 
-        processor.onScheduled(runner.getProcessContext());
-
-        mockStateManager.setFailOnStateGet(Scope.LOCAL, true);
-
         runner.enqueue(new byte[0], Map.of("pencils", "2"));
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
-        runner.assertQueueNotEmpty();
 
+        // simulate fail on state retrieval
+        mockStateManager.setFailOnStateGet(Scope.LOCAL, true);
+        mockStateManager.setFailOnStateSet(Scope.LOCAL, false);
+
+        assertThrows(AssertionError.class, runner::run);
+
+        runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
+
+        // simulate fail on state persistence
         mockStateManager.setFailOnStateGet(Scope.LOCAL, false);
         mockStateManager.setFailOnStateSet(Scope.LOCAL, true);
 
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
+        assertThrows(AssertionError.class, runner::run);
 
-        runner.assertQueueEmpty();
-
-        runner.assertAllFlowFilesTransferred(UpdateAttribute.REL_FAILED_SET_STATE, 1);
-        final MockFlowFile flowFile = runner.getFlowFilesForRelationship(UpdateAttribute.REL_FAILED_SET_STATE).getFirst();
-        flowFile.assertAttributeEquals("count", "1");
-        flowFile.assertAttributeEquals("sum", "2");
+        runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
     }
 
 
@@ -224,25 +225,27 @@ public class TestUpdateAttribute {
         runner.setProperty(UpdateAttribute.STATEFUL_VARIABLES_INIT_VALUE, "0");
         runner.setAnnotationData(serialize(criteria));
 
-        processor.onScheduled(runner.getProcessContext());
-
         runner.enqueue(new byte[0], Map.of("value", "1"));
 
+        // simulate fail on state retrieval
         mockStateManager.setFailOnStateGet(Scope.LOCAL, true);
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
+        mockStateManager.setFailOnStateSet(Scope.LOCAL, false);
+
+        assertThrows(AssertionError.class, runner::run);
 
         runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
+
+        // simulate fail on state persistence
         mockStateManager.setFailOnStateGet(Scope.LOCAL, false);
         mockStateManager.setFailOnStateSet(Scope.LOCAL, true);
 
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
+        assertThrows(AssertionError.class, runner::run);
 
-        runner.assertQueueEmpty();
-
-        runner.assertAllFlowFilesTransferred(UpdateAttribute.REL_FAILED_SET_STATE, 1);
-        final MockFlowFile flowFile = runner.getFlowFilesForRelationship(UpdateAttribute.REL_FAILED_SET_STATE).getFirst();
-        flowFile.assertAttributeEquals("maxValue", "1");
-        flowFile.assertAttributeEquals("maxValue2", "1");
+        runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
     }
 
     @Test
@@ -266,25 +269,27 @@ public class TestUpdateAttribute {
         runner.setProperty(UpdateAttribute.STATEFUL_VARIABLES_INIT_VALUE, "0");
         runner.setAnnotationData(serialize(criteria));
 
-        processor.onScheduled(runner.getProcessContext());
-
         runner.enqueue(new byte[0], Map.of("value", "1"));
 
+        // simulate fail on state retrieval
         mockStateManager.setFailOnStateGet(Scope.LOCAL, true);
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
+        mockStateManager.setFailOnStateSet(Scope.LOCAL, false);
+
+        assertThrows(AssertionError.class, runner::run);
 
         runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
+
+        // simulate fail on state persistence
         mockStateManager.setFailOnStateGet(Scope.LOCAL, false);
         mockStateManager.setFailOnStateSet(Scope.LOCAL, true);
 
-        processor.onTrigger(runner.getProcessContext(), processSessionFactory.createSession());
+        assertThrows(AssertionError.class, runner::run);
 
-        runner.assertQueueEmpty();
-
-        runner.assertAllFlowFilesTransferred(UpdateAttribute.REL_FAILED_SET_STATE, 1);
-        final MockFlowFile flowFile = runner.getFlowFilesForRelationship(UpdateAttribute.REL_FAILED_SET_STATE).getFirst();
-        flowFile.assertAttributeEquals("maxValue", "1");
-        flowFile.assertAttributeNotExists("maxValue2");
+        runner.assertQueueNotEmpty();
+        runner.assertTransferCount(UpdateAttribute.REL_SUCCESS, 0);
+        runner.assertTransferCount(UpdateAttribute.REL_FAILED_SET_STATE, 0);
     }
     @Test
     public void testRuleHitWithStateWithDefault() {
