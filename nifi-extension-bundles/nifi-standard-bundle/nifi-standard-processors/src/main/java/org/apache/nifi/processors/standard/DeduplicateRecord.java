@@ -210,6 +210,7 @@ public class DeduplicateRecord extends AbstractProcessor {
             .required(true)
             .build();
 
+    // TODO NIFI-14055 reuse for DeleteDistributedMapCache? turn allowable values to enum?
     static final PropertyDescriptor RECORD_HASHING_ALGORITHM = new PropertyDescriptor.Builder()
             .name("record-hashing-algorithm")
             .displayName("Record Hashing Algorithm")
@@ -534,6 +535,7 @@ public class DeduplicateRecord extends AbstractProcessor {
         }
     }
 
+    // TODO NIFI-14055 how to reuse this?
     private String evaluateKeyFromDynamicProperties(ProcessContext context, Record record, FlowFile flowFile) {
         final List<String> fieldValues = new ArrayList<>();
         for (final PropertyDescriptor propertyDescriptor : dynamicProperties) {

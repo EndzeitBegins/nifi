@@ -24,6 +24,7 @@ import org.apache.nifi.distributed.cache.client.Serializer;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 final class MockCacheService extends AbstractControllerService implements DistributedMapCacheClient {
     private final Map<Object, Object> storage;
@@ -83,5 +84,10 @@ final class MockCacheService extends AbstractControllerService implements Distri
         } else {
             return false;
         }
+    }
+
+    @Override
+    public <K> Set<K> keySet(Deserializer<K> keyDeserializer) {
+        return (Set<K>) storage.keySet();
     }
 }
